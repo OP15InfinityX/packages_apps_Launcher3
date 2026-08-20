@@ -835,7 +835,8 @@ public class FolderIcon extends FrameLayout implements FloatingIconViewCompanion
                     - cellHeightPx) / 2), getPaddingRight(), getPaddingBottom());
             lp.topMargin = iconSize + labelPadding;
         } else {
-            setPadding(getPaddingLeft(), 0, getPaddingRight(), getPaddingBottom());
+            // Keep the workspace cell padding assigned by ShortcutAndWidgetContainer so folder
+            // previews align vertically with regular workspace icons.
             lp.topMargin = iconSize + labelPadding;
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
