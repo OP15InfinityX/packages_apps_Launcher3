@@ -814,6 +814,12 @@ public class TaskbarView extends FrameLayout implements FolderIcon.FolderIconPar
             return 0;
         }
 
+        // Trimming is only needed when navigation buttons consume space at the taskbar edge.
+        // In gestural mode it leaves the final pinned icon missing until the hotseat is shown.
+        if (!mActivityContext.isThreeButtonNav()) {
+            return 0;
+        }
+
         // Add icon for all apps and divider line.
         int icons = 2;
 
