@@ -30,6 +30,7 @@ import com.android.launcher3.LauncherSettings.Favorites
 import com.android.launcher3.LauncherState
 import com.android.launcher3.R
 import com.android.launcher3.Utilities
+import com.android.launcher3.allapps.AppDrawerStyle
 import com.android.launcher3.config.FeatureFlags
 import com.android.launcher3.homescreenfiles.HomeScreenFilesProvider
 import com.android.launcher3.homescreenfiles.HomeScreenFilesUpdate.Extras.Companion.builder
@@ -98,19 +99,21 @@ object WorkspaceLongPressOptions {
             )
         }
 
-        add(
-            PopupData(
-                R.drawable.ic_apps,
-                R.string.all_apps_button_label,
-                SYSTEM_SHORTCUT,
-                LAUNCHER_ALL_APPS_TAP_OR_LONGPRESS,
-            ) { ac, _, _ ->
-                (ac as? Launcher)?.apply {
-                    activityComponent.keyboardStateManager.launchedFromA11y = true
-                    stateManager.goToState(LauncherState.ALL_APPS)
+        if (!AppDrawerStyle.isIos(AppDrawerStyle.get(ctx))) {
+            add(
+                PopupData(
+                    R.drawable.ic_apps,
+                    R.string.all_apps_button_label,
+                    SYSTEM_SHORTCUT,
+                    LAUNCHER_ALL_APPS_TAP_OR_LONGPRESS,
+                ) { ac, _, _ ->
+                    (ac as? Launcher)?.apply {
+                        activityComponent.keyboardStateManager.launchedFromA11y = true
+                        stateManager.goToState(LauncherState.ALL_APPS)
+                    }
                 }
-            }
-        )
+            )
+        }
 
         if (Flags.condoPlanner()) {
             add(

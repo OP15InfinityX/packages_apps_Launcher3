@@ -23,6 +23,57 @@
         android:key="recents_category_general"
         android:title="@string/general_category_title">
 
+        <ListPreference
+            android:key="pref_recents_style"
+            android:title="@string/recents_style_title"
+            android:entries="@array/recents_styles_entries"
+            android:entryValues="@array/recents_styles_values"
+            android:defaultValue="default"
+            android:persistent="true"
+            android:summary="%s"
+            launcher:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_recents_scroll_vibrate"
+            android:title="@string/recents_scroll_vibrate_title"
+            android:defaultValue="true"
+            android:persistent="true"
+            launcher:iconSpaceReserved="false" />
+
+    <SwitchPreferenceCompat
+            android:key="pref_start_freeform_by_gesture"
+            android:title="@string/overview_gesture_title"
+            android:summary="@string/overview_gesture_summary"
+            android:defaultValue="false"
+            launcher:iconSpaceReserved="false" />
+
+        <ListPreference
+            android:key="pref_overview_gesture_action"
+            android:title="@string/overview_gesture_action_title"
+            android:entries="@array/overview_gesture_action_entries"
+            android:entryValues="@array/overview_gesture_action_values"
+            android:defaultValue="freeform"
+            android:dependency="pref_start_freeform_by_gesture"
+            android:summary="%s"
+            launcher:iconSpaceReserved="false" />
+
+        <com.android.launcher3.settings.preferences.CustomSeekBarPreference
+            android:key="pref_start_freeform_progress"
+            android:title="@string/overview_gesture_threshold_title"
+            android:summary="@string/overview_gesture_threshold_summary"
+            android:defaultValue="20"
+            android:min="10"
+            android:max="50"
+            android:dependency="pref_start_freeform_by_gesture"
+            launcher:iconSpaceReserved="false" />
+
+        <SwitchPreferenceCompat
+            android:key="pref_swipe_down_to_lock"
+            android:title="@string/swipe_down_to_lock_title"
+            android:summary="@string/swipe_down_to_lock_summary"
+            android:defaultValue="false"
+            launcher:iconSpaceReserved="false" />
+
         <com.android.launcher3.settings.preferences.CustomSeekBarPreference
             android:key="pref_recents_opacity"
             android:title="@string/background_opacity_title"
@@ -66,5 +117,4 @@
             android:persistent="true"
             launcher:iconSpaceReserved="false" />
     </PreferenceCategory>
-
 </androidx.preference.PreferenceScreen>

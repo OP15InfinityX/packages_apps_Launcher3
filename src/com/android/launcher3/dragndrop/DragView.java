@@ -20,8 +20,10 @@ import static android.view.View.MeasureSpec.EXACTLY;
 import static android.view.View.MeasureSpec.makeMeasureSpec;
 
 import static com.android.launcher3.LauncherAnimUtils.VIEW_ALPHA;
+import static com.android.launcher3.LauncherSettings.Favorites.FOLDER_STYLE_CIRCLE;
 import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_APPWIDGET;
 import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_DEEP_SHORTCUT;
+import static com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE_FOLDER;
 import static com.android.launcher3.icons.FastBitmapDrawable.getDisabledColorFilter;
 import static com.android.launcher3.util.Executors.MODEL_EXECUTOR;
 
@@ -63,6 +65,7 @@ import com.android.launcher3.folder.ClippedFolderIconLayoutRule;
 import com.android.launcher3.graphics.ThemeManager;
 import com.android.launcher3.icons.FastBitmapDrawable;
 import com.android.launcher3.icons.IconNormalizer;
+import com.android.launcher3.model.data.FolderInfo;
 import com.android.launcher3.model.data.ItemInfo;
 import com.android.launcher3.util.RunnableList;
 import com.android.launcher3.util.ViewEx;
@@ -129,6 +132,7 @@ public class DragView extends FrameLayout {
     private Path mScaledMaskPath;
     private Drawable mBadge;
     private int mItemType;
+    private boolean mIsAdaptiveIcon = true;
 
     private final Set<Consumer<Float>> mOnAlphaChangeListeners = new HashSet<>();
 
@@ -265,6 +269,12 @@ public class DragView extends FrameLayout {
      */
     @TargetApi(Build.VERSION_CODES.O)
     public void setItemInfo(final ItemInfo info) {
+        if (ITEM_TYPE_FOLDER == info.itemType
+               && info instanceof FolderInfo
+               && ((FolderInfo) info).folderStyle != FOLDER_STYLE_CIRCLE) {
+             mIsAdaptiveIcon = false;
+             return;
+        }
         mItemType = info.itemType;
         if (!mAllowSpringDrawable) {
             return;
@@ -446,7 +456,7 @@ public class DragView extends FrameLayout {
 
         if (mContent != null) {
             // At the drag start, the source view visibility is set to invisible.
-            if (getHasDragOffset()) {
+            if (getHasDragOffset() && mIsAdaptiveIcon) {
                 // If there is any dragOffset, this means the content will show away of the original
                 // icon location, otherwise it's fine since original content would just show at the
                 // same spot.

@@ -33,6 +33,7 @@ import androidx.annotation.WorkerThread;
 
 import com.android.launcher3.BaseActivity;
 import com.android.launcher3.DeviceProfile;
+import com.android.launcher3.R;
 import com.android.launcher3.display.DisplayController;
 import com.android.launcher3.display.LauncherDisplayInfo;
 import com.android.launcher3.util.ContextTracker;
@@ -58,6 +59,7 @@ public class RotationHelper implements DeviceProfile.OnDeviceProfileChangeListen
 
     private boolean mIgnoreAutoRotateSettings;
     private boolean mForceAllowRotationForTesting;
+    private final boolean mForceAllowRotation;
 
     /**
      * Rotation request made by
@@ -85,12 +87,13 @@ public class RotationHelper implements DeviceProfile.OnDeviceProfileChangeListen
         mActivity = activity;
         mRequestOrientationHandler =
                 new Handler(UI_HELPER_EXECUTOR.getLooper(), this::setOrientationAsync);
+        mForceAllowRotation = activity.getResources().getBoolean(R.bool.config_allowRotation);
     }
 
     private void setIgnoreAutoRotateSettings(boolean ignoreAutoRotateSettings) {
         if (mDestroyed) return;
         // On large devices we do not handle auto-rotate differently.
-        mIgnoreAutoRotateSettings = ignoreAutoRotateSettings;
+        mIgnoreAutoRotateSettings = ignoreAutoRotateSettings || mForceAllowRotation;
     }
 
     /**

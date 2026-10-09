@@ -39,12 +39,6 @@
     <dimen name="quickspace_alternate_title_size">18sp</dimen>
     <dimen name="quickspace_alternate_subtitle_size">16sp</dimen>
 
-    <!-- Wallpaper carousel -->
-    <dimen name="wallpaper_carousel_height">120dp</dimen>
-
-    <!-- App drawer searchbar -->
-    <dimen name="all_apps_search_bar_bottom_padding_extra">32dp</dimen>
-
     <!-- For Themed icon support -->
     <dimen name="theme_icon_size">24dp</dimen>
 

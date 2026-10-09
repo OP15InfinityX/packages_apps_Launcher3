@@ -19,7 +19,6 @@ import android.animation.ValueAnimator
 import android.animation.ValueAnimator.AnimatorUpdateListener
 import android.view.animation.Interpolator
 import com.android.app.animation.Interpolators.LINEAR
-import com.android.launcher3.Utilities
 
 /**
  * Utility class to update multiple values with different interpolators and durations during the
@@ -35,7 +34,7 @@ constructor(val defaultInterpolator: Interpolator = LINEAR) : AnimatorUpdateList
 
         allProperties.forEach {
             val interpolatedPercent = it.interpolator.getInterpolation(percent)
-            it.value = Utilities.mapRange(interpolatedPercent, it.startValue, it.endValue)
+            it.value = it.startValue + interpolatedPercent * (it.endValue - it.startValue)
         }
         onUpdate(percent, false /* initOnly */)
     }

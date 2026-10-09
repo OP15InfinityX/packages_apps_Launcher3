@@ -40,6 +40,7 @@ import android.view.animation.Interpolator;
 import androidx.annotation.NonNull;
 
 import com.android.launcher3.BubbleTextView;
+import com.android.launcher3.LauncherSettings;
 import com.android.launcher3.CellLayout;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.R;
@@ -150,10 +151,22 @@ public class FolderAnimationManager implements FolderAnimationCreator {
         float initialSize = (scaledRadius * 2) * scaleRelativeToDragLayer;
 
         // Match size/scale of icons in the preview
-        float previewScale = rule.scaleForItem(itemsInPreview.size(), 0);
-        float previewSize = rule.getIconSize() * previewScale;
-        float baseIconSize = getBubbleTextView(itemsInPreview.get(0)).getIconSize();
-        float initialScale = previewSize / baseIconSize * scaleRelativeToDragLayer;
+        boolean isEnlargedIcon = mFolderIcon.mInfo != null
+                && mFolderIcon.mInfo.spanX > 1
+                && mFolderIcon.mInfo.spanY > 1;
+        boolean isCoverStyle = mFolderIcon.getFolderStyle() == LauncherSettings.Favorites.FOLDER_STYLE_COVER;
+
+        float initialScale;
+        if (isCoverStyle) {
+            initialScale = scaleRelativeToDragLayer;
+        } else if (isEnlargedIcon) {
+            initialScale = 0.9f;
+        } else {
+            float previewScale = rule.scaleForItem(itemsInPreview.size(), 0);
+            float previewSize = rule.getIconSize() * previewScale;
+            float baseIconSize = getBubbleTextView(itemsInPreview.get(0)).getIconSize();
+            initialScale = previewSize / baseIconSize * scaleRelativeToDragLayer;
+        }
         final float finalScale = 1f;
         float scale = mIsOpening ? initialScale : finalScale;
         mFolder.setPivotX(0);
@@ -244,7 +257,12 @@ public class FolderAnimationManager implements FolderAnimationCreator {
         }
         play(a, getAnimator(mFolder.mFooter, ALPHA, 0, 1f), footerStartDelay, footerAlphaDuration);
 
-        ShapeDelegate shapeDelegate = ThemeManager.INSTANCE.get(mContext).getFolderShape();
+        ShapeDelegate shapeDelegate;
+        if (mFolderIcon.getFolderStyle() == LauncherSettings.Favorites.FOLDER_STYLE_GRID) {
+            shapeDelegate = new ShapeDelegate.RoundedSquare(0.3f);
+        } else {
+            shapeDelegate = ThemeManager.INSTANCE.get(mContext).getFolderShape();
+        }
         // Create reveal animator for the folder background
         play(a, shapeDelegate.createRevealAnimator(
                 mFolder, startRect, endRect, finalRadius, !mIsOpening));
@@ -329,8 +347,10 @@ public class FolderAnimationManager implements FolderAnimationCreator {
                 mFolder.setTranslationZ(0.0f);
                 mFolder.mContent.setScaleX(1f);
                 mFolder.mContent.setScaleY(1f);
+                mFolder.mContent.setAlpha(1f);
                 mFolder.mFooter.setScaleX(1f);
                 mFolder.mFooter.setScaleY(1f);
+                mFolder.mFooter.setAlpha(1f);
                 mFolder.mFooter.setTranslationX(0f);
                 mFolder.getFolderName().setAlpha(1f);
 
@@ -482,7 +502,7 @@ public class FolderAnimationManager implements FolderAnimationCreator {
     }
 
     private boolean isLargeFolder() {
-        return mFolder.getItemCount() > MAX_NUM_ITEMS_IN_PREVIEW;
+        return mFolder.getItemCount() > mFolderIcon.getMaxPreviewItems();
     }
 
     private Interpolator getPreviewItemInterpolator() {

@@ -282,6 +282,7 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
     private void updateClockVisibilityAndColor() {
     boolean altUI = LauncherPrefs.SHOW_QUICKSPACE_ALT.get(getContext());
     boolean showClock = LauncherPrefs.SHOW_QUICKSPACE_CLOCK.get(getContext());
+    int clockColor = LauncherPrefs.QUICKSPACE_CLOCK_COLOR.get(getContext());
         boolean nowPlaying = false;
         if (mController != null && mController.getEventController() != null) {
             nowPlaying = mController.getEventController().isNowPlaying();
@@ -292,6 +293,7 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
             if (mClock1 != null) mClock1.setVisibility(showClock ? View.VISIBLE : View.GONE);
             if (mClock2 != null) {
                 mClock2.setVisibility(showClock ? View.VISIBLE : View.GONE);
+                if (showClock) applyQuickspaceClockColor(clockColor);
             }
             return;
         }
@@ -333,6 +335,7 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
         if (mClock1 != null) mClock1.setVisibility(showClock ? View.VISIBLE : View.GONE);
         if (mClock2 != null) {
             mClock2.setVisibility(showClock ? View.VISIBLE : View.GONE);
+            if (showClock) applyQuickspaceClockColor(clockColor);
         }
 
         // If clock is hidden and the main title is just the date, hide the duplicate second line
@@ -347,6 +350,15 @@ public class QuickSpaceView extends FrameLayout implements OnDataListener {
         } else if (mEventTitle != null && mEventTitle.getVisibility() != View.VISIBLE) {
             // Restore visibility in other scenarios
             mEventTitle.setVisibility(View.VISIBLE);
+        }
+    }
+
+    public void applyQuickspaceClockColor(int clockColor) {
+        if (clockColor == 0) {
+            clockColor = 0xffff0000;
+        }
+        if (mClock2 != null) {
+            mClock2.setTextColor(clockColor);
         }
     }
 

@@ -66,6 +66,7 @@ constructor(
     private val tmpRectF = RectF()
     private val coordinateTransfer: RemoteAnimationCoordinateTransfer =
         RemoteAnimationCoordinateTransfer(activityContext)
+    private val transaction = SurfaceTransaction()
 
     private var windowCornerRadius: Float? = null
 
@@ -87,11 +88,10 @@ constructor(
     }
 
     fun getCornerRadius(progress: Float): Float =
-        Utilities.mapRange(progress, startRadius, endRadius)
+        startRadius + progress * (endRadius - startRadius)
 
     override fun onUpdate(currentRectF: RectF, progress: Float) {
         appTargets ?: return
-        val transaction = SurfaceTransaction()
         for (i in appTargets.indices.reversed()) {
             val target = appTargets[i]
             val builder = transaction.forSurface(target.leash)

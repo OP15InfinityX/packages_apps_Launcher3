@@ -20,22 +20,30 @@ import android.content.Context
 import android.graphics.Rect
 import android.view.MotionEvent
 import com.android.app.animation.Interpolators.ZOOM_IN
+import com.android.launcher3.AbstractFloatingView
 import com.android.launcher3.LauncherAnimUtils
+import com.android.launcher3.LauncherPrefs
 import com.android.launcher3.Utilities.EDGE_NAV_BAR
 import com.android.launcher3.Utilities.boundToRange
 import com.android.launcher3.Utilities.debugLog
 import com.android.launcher3.Utilities.isRtl
 import com.android.launcher3.anim.AnimatorPlaybackController
+import com.android.launcher3.anim.PendingAnimation
 import com.android.launcher3.display.DisplayController
 import com.android.launcher3.touch.BaseSwipeDetector
 import com.android.launcher3.touch.SingleAxisSwipeDetector
 import com.android.launcher3.util.FlingBlockCheck
+import com.android.launcher3.util.MSDLPlayerWrapper
 import com.android.launcher3.util.TouchController
+import com.android.quickstep.views.RecentsDismissUtils
 import com.android.quickstep.views.RecentsView
 import com.android.quickstep.views.RecentsViewContainer
 import com.android.quickstep.views.TaskView
+import com.google.android.msdl.data.model.MSDLToken
 import java.util.function.Consumer
 import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.roundToInt
 
 /** Touch controller which handles dragging task view cards for launch. */
 class TaskViewLaunchTouchController<CONTAINER>
@@ -58,10 +66,16 @@ constructor(
     private val downDirection = recentsView.pagedOrientationHandler.getDownDirection(isRtl)
 
     private var taskBeingDragged: TaskView? = null
+    private var settleAnimation: RecentsDismissUtils.SpringSet? = null
     private var launchEndDisplacement: Float = 0f
+    private var maxLockDisplacement: Float = 0f
     private var playbackController: AnimatorPlaybackController? = null
     private var verticalFactor: Int = 0
     private var canInterceptTouch = false
+    private var isDragging = false
+    private var isLockGestureActive = false
+    private var wasLockedBeforeDrag = false
+    private var isBeyondLockThreshold = false
 
     private fun canInterceptTouch(ev: MotionEvent): Boolean =
         when {
@@ -72,8 +86,31 @@ constructor(
                 false
             }
 
+            AbstractFloatingView.getTopOpenViewWithType(
+                container,
+                AbstractFloatingView.TYPE_TOUCH_CONTROLLER_NO_INTERCEPT,
+            ) != null -> {
+                debugLog(TAG, "Not intercepting, open floating view blocking touch.")
+                false
+            }
+
+            !recentsView.scroller.isFinished -> {
+                debugLog(TAG, "Not intercepting touch, recents scrolling.")
+                false
+            }
+
+            !recentsView.stateManager.state.isTaskViewInteractive -> {
+                debugLog(TAG, "Not intercepting touch, recents not interactive.")
+                false
+            }
+
             !recentsView.shouldSwipeDownLaunchTaskView(taskBeingDragged) -> {
                 // Already logged in RecentsViewUtils.
+                false
+            }
+
+            taskBeingDragged?.getLockablePackages().isNullOrEmpty() -> {
+                debugLog(TAG, "Not intercepting touch, task cannot be locked.")
                 false
             }
 
@@ -93,6 +130,7 @@ constructor(
             clearState()
         }
         if (ev.action == MotionEvent.ACTION_DOWN) {
+            settleAnimation?.speedUpSpringsToEnd()
             canInterceptTouch = onActionDown(ev)
             if (!canInterceptTouch) {
                 clearState()
@@ -115,10 +153,7 @@ constructor(
 
     private fun onActionDown(ev: MotionEvent): Boolean {
         taskBeingDragged =
-            recentsView.taskViews
-                .firstOrNull {
-                    recentsView.isTaskViewVisible(it) && container.dragLayer.isEventOverView(it, ev)
-                }
+            recentsView.findTopMostTaskUnderEvent(ev)
                 ?.also {
                     verticalFactor =
                         recentsView.pagedOrientationHandler.getTaskDragDisplacementFactor(isRtl)
@@ -132,74 +167,210 @@ constructor(
 
     override fun onDragStart(start: Boolean, startDisplacement: Float) {
         val taskBeingDragged = taskBeingDragged ?: return
-        debugLog(TAG, "Handling touch event.")
+        isLockGestureActive = LauncherPrefs.SWIPE_DOWN_TO_LOCK.get(container)
 
-        val secondaryLayerDimension: Int =
-            recentsView.pagedOrientationHandler.getSecondaryDimension(container.getDragLayer())
-        val maxDuration = 2L * secondaryLayerDimension
-        recentsView.clearPendingAnimation()
-        val pendingAnimation =
-            recentsView.createTaskLaunchAnimation(taskBeingDragged, maxDuration, ZOOM_IN)
-        // Since the thumbnail is what is filling the screen, based the end displacement on it.
-        taskBeingDragged.getThumbnailBounds(tempRect, /* relativeToDragLayer= */ true)
-        launchEndDisplacement =
-            recentsView.pagedOrientationHandler
-                .getTaskLaunchLength(secondaryLayerDimension, tempRect)
-                .toFloat() * verticalFactor
-        playbackController =
-            pendingAnimation.createPlaybackController()?.apply {
-                onAnimationCreatedCallback?.accept(this)
-                dispatchOnStart()
-            }
+        if (isLockGestureActive) {
+            debugLog(TAG, "Handling lock touch event.")
+
+            val secondaryLayerDimension: Int =
+                recentsView.pagedOrientationHandler.getSecondaryDimension(container.dragLayer)
+            taskBeingDragged.getThumbnailBounds(tempRect, /* relativeToDragLayer= */ true)
+            maxLockDisplacement =
+                ceil(
+                    recentsView.pagedOrientationHandler.getTaskDismissLength(
+                        secondaryLayerDimension,
+                        tempRect,
+                    ) * LOCK_DISPLACEMENT_FRACTION
+                ) * verticalFactor
+
+            isDragging = true
+            isBeyondLockThreshold = false
+            wasLockedBeforeDrag = taskBeingDragged.isLocked
+            taskBeingDragged.isBeingDraggedForDismissal = true
+            taskBeingDragged.translationZ = 0.1f
+
+            container.actionsView?.showLockPill(wasLockedBeforeDrag)
+        } else {
+            debugLog(TAG, "Handling touch event.")
+
+            val secondaryLayerDimension: Int =
+                recentsView.pagedOrientationHandler.getSecondaryDimension(container.dragLayer)
+            val maxDuration = 2L * secondaryLayerDimension
+            recentsView.clearPendingAnimation()
+            val pendingAnimation =
+                recentsView.createTaskLaunchAnimation(taskBeingDragged, maxDuration, ZOOM_IN)
+            taskBeingDragged.getThumbnailBounds(tempRect, /* relativeToDragLayer= */ true)
+            launchEndDisplacement =
+                recentsView.pagedOrientationHandler
+                    .getTaskLaunchLength(secondaryLayerDimension, tempRect)
+                    .toFloat() * verticalFactor
+            playbackController =
+                pendingAnimation.createPlaybackController()?.apply {
+                    onAnimationCreatedCallback?.accept(this)
+                    dispatchOnStart()
+                }
+        }
     }
 
     override fun onDrag(displacement: Float): Boolean {
-        playbackController?.setPlayFraction(
-            boundToRange(displacement / launchEndDisplacement, 0f, 1f)
-        )
+        if (isLockGestureActive) {
+            val taskBeingDragged = taskBeingDragged ?: return false
+            if (maxLockDisplacement == 0f) return true
+            val progress = boundToRange(displacement / maxLockDisplacement, 0f, 1f)
+            val translation = progress * maxLockDisplacement
+            taskBeingDragged.secondaryDismissTranslationProperty.setValue(taskBeingDragged, translation)
+            setLiveTileTranslation(taskBeingDragged, translation, onlyIfDrawingLiveTile = true)
+            updateLockThreshold(progress)
+        } else {
+            playbackController?.setPlayFraction(
+                boundToRange(displacement / launchEndDisplacement, 0f, 1f)
+            )
+        }
         return true
     }
 
+    private fun updateLockThreshold(progress: Float) {
+        val isBeyond = progress >= LOCK_THRESHOLD_FRACTION
+        if (isBeyond == isBeyondLockThreshold) return
+        isBeyondLockThreshold = isBeyond
+        playThresholdHaptic()
+    }
+
+    private fun playThresholdHaptic() {
+        MSDLPlayerWrapper.INSTANCE.get(recentsView.context)
+            .playToken(MSDLToken.SWIPE_THRESHOLD_INDICATOR)
+    }
+
     override fun onDragEnd(velocity: Float) {
-        val playbackController = playbackController ?: return
+        if (isLockGestureActive) {
+            val taskBeingDragged = taskBeingDragged ?: return
 
-        val isBeyondLaunchThreshold =
-            abs(playbackController.progressFraction) > abs(LAUNCH_THRESHOLD_FRACTION)
-        val velocityIsNegative = !recentsView.pagedOrientationHandler.isGoingUp(velocity, isRtl)
-        val isFlingingTowardsLaunch = detector.isFling(velocity) && velocityIsNegative
-        val isFlingingTowardsRestState = detector.isFling(velocity) && !velocityIsNegative
-        val isLaunching =
-            isFlingingTowardsLaunch || (isBeyondLaunchThreshold && !isFlingingTowardsRestState)
+            val currentDisplacement =
+                taskBeingDragged.secondaryDismissTranslationProperty.get(taskBeingDragged)
+            val progress =
+                if (maxLockDisplacement == 0f) 0f
+                else boundToRange(currentDisplacement / maxLockDisplacement, 0f, 1f)
+            val isFling = detector.isFling(velocity)
+            val isFlingingTowardsLock =
+                isFling && !recentsView.pagedOrientationHandler.isGoingUp(velocity, isRtl)
+            val isFlingingTowardsRestState = isFling && !isFlingingTowardsLock
+            val shouldToggleLock =
+                isFlingingTowardsLock ||
+                    (progress >= LOCK_THRESHOLD_FRACTION && !isFlingingTowardsRestState)
 
-        val progress = playbackController.progressFraction
-        var animationDuration =
-            BaseSwipeDetector.calculateDuration(
+            if (shouldToggleLock) {
+                // Confirm a fling-triggered toggle that never crossed the threshold.
+                if (!isBeyondLockThreshold) playThresholdHaptic()
+                taskBeingDragged.toggleLockState()
+            }
+
+            isDragging = false
+            taskBeingDragged.isBeingDraggedForDismissal = false
+            container.actionsView?.hideLockPill()
+
+            val dismissLength = abs(maxLockDisplacement).roundToInt()
+            settleAnimation =
+                recentsView.runTaskDismissSettlingSpringAnimation(
+                    taskBeingDragged,
+                    /* isDismissing= */ false,
+                    RecentsDismissUtils.DismissedTaskData(
+                        startVelocity = velocity,
+                        dismissLength = dismissLength,
+                        finalPosition = 0f,
+                        dismissThreshold = (LOCK_THRESHOLD_FRACTION * maxLockDisplacement).roundToInt(),
+                    ),
+                    /* shouldRemoveTaskView= */ false,
+                    /* isSplitSelection= */ false,
+                )
+            val settle = settleAnimation
+            if (settle == null) {
+                resetDraggedTask(taskBeingDragged)
+            } else {
+                settle.addEndListener {
+                    resetDraggedTask(taskBeingDragged)
+                    taskBeingDragged.isBeingDismissed = false
+                    if (settleAnimation === settle) settleAnimation = null
+                }
+            }
+
+            this.taskBeingDragged = null
+            detector.finishedScrolling()
+            detector.setDetectableScrollConditions(0, false)
+        } else {
+            val playbackController = playbackController ?: return
+
+            val isBeyondLaunchThreshold =
+                abs(playbackController.progressFraction) > abs(LAUNCH_THRESHOLD_FRACTION)
+            val velocityIsNegative = !recentsView.pagedOrientationHandler.isGoingUp(velocity, isRtl)
+            val isFlingingTowardsLaunch = detector.isFling(velocity) && velocityIsNegative
+            val isFlingingTowardsRestState = detector.isFling(velocity) && !velocityIsNegative
+            val isLaunching =
+                isFlingingTowardsLaunch || (isBeyondLaunchThreshold && !isFlingingTowardsRestState)
+
+            val progress = playbackController.progressFraction
+            var animationDuration =
+                BaseSwipeDetector.calculateDuration(
+                    velocity,
+                    if (isLaunching) (1 - progress) else progress,
+                )
+            if (detector.isFling(velocity) && flingBlockCheck.isBlocked && !isLaunching) {
+                animationDuration *= LauncherAnimUtils.blockedFlingDurationFactor(velocity).toLong()
+            }
+
+            playbackController.setEndAction(this::clearState)
+            playbackController.startWithVelocity(
+                container,
+                isLaunching,
                 velocity,
-                if (isLaunching) (1 - progress) else progress,
+                launchEndDisplacement,
+                animationDuration,
             )
-        if (detector.isFling(velocity) && flingBlockCheck.isBlocked && !isLaunching) {
-            animationDuration *= LauncherAnimUtils.blockedFlingDurationFactor(velocity).toLong()
         }
+    }
 
-        playbackController.setEndAction(this::clearState)
-        playbackController.startWithVelocity(
-            container,
-            isLaunching,
-            velocity,
-            launchEndDisplacement,
-            animationDuration,
-        )
+    private fun resetDraggedTask(taskView: TaskView) {
+        taskView.secondaryDismissTranslationProperty.setValue(taskView, 0f)
+        setLiveTileTranslation(taskView, 0f, onlyIfDrawingLiveTile = false)
+        taskView.translationZ = 0f
+        taskView.isBeingDraggedForDismissal = false
+    }
+
+    private fun setLiveTileTranslation(
+        taskView: TaskView,
+        translation: Float,
+        onlyIfDrawingLiveTile: Boolean,
+    ) {
+        if (!taskView.isRunningTask) return
+        if (onlyIfDrawingLiveTile && !recentsView.enableDrawingLiveTile) return
+        recentsView.runActionOnRemoteHandles { remoteTargetHandle ->
+            remoteTargetHandle.taskViewSimulator.taskSecondaryTranslation.value = translation
+        }
+        recentsView.redrawLiveTile()
     }
 
     private fun clearState() {
         detector.finishedScrolling()
         detector.setDetectableScrollConditions(0, false)
+        if (isLockGestureActive) {
+            if (isDragging) {
+                taskBeingDragged?.let { resetDraggedTask(it) }
+                container.actionsView?.hideLockPill()
+            }
+            isDragging = false
+            isBeyondLockThreshold = false
+        }
         taskBeingDragged = null
         playbackController = null
     }
 
     companion object {
         private const val TAG = "TaskViewLaunchTouchController"
-        private const val LAUNCH_THRESHOLD_FRACTION: Float = 0.5f
+        private const val LAUNCH_THRESHOLD_FRACTION = 0.5f
+
+        // How far the card travels, as a fraction of its dismiss length.
+        private const val LOCK_DISPLACEMENT_FRACTION = 0.4f
+
+        // Fraction of the travel past which releasing toggles the lock.
+        private const val LOCK_THRESHOLD_FRACTION = 0.5f
     }
 }

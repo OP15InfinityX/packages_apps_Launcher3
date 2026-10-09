@@ -68,13 +68,16 @@ import com.android.launcher3.shortcuts.ShortcutRequest
 import com.android.launcher3.util.ApplicationInfoWrapper
 import com.android.launcher3.util.CancellableTask
 import com.android.launcher3.util.ComponentKey
+import com.android.launcher3.util.CustomAppNameStore
 import com.android.launcher3.util.DaggerSingletonTracker
 import com.android.launcher3.util.Executors
 import com.android.launcher3.util.Executors.MAIN_EXECUTOR
 import com.android.launcher3.util.InstantAppResolver
 import com.android.launcher3.util.LooperExecutor
 import com.android.launcher3.util.PackageUserKey
+import com.android.launcher3.util.TaskSchedule
 import com.android.launcher3.widget.WidgetSections
+import java.util.ArrayList
 import java.util.concurrent.Executor
 import java.util.function.Supplier
 import javax.inject.Inject
@@ -495,6 +498,7 @@ constructor(
 
         Trace.beginSection("loadIconSubsectionWithFallback")
 
+        val tasksList = ArrayList<TaskSchedule.SafelyRunnable>()
         // Fallback title and icon loading
         duplicateIconRequestsMap.forEach { (cn, iconRequestInfos) ->
             val iconRequestInfo = iconRequestInfos[0]
@@ -518,24 +522,40 @@ constructor(
                 entry.bitmap = icon
                 entry.contentDescription = itemInfo.contentDescription ?: ""
 
-                if (loadFallbackIcon) {
-                    loadFallbackIcon(
-                        lai,
-                        entry,
-                        LauncherActivityCachingLogic,
-                        iconRequestInfo.lookupFlag.withUsePackageIcon(false),
-                        usePackageTitle = loadFallbackTitle,
-                        cn,
-                        sectionKey.user,
-                    )
-                }
-                if (loadFallbackTitle && TextUtils.isEmpty(entry.title) && lai != null) {
-                    loadFallbackTitle(lai, entry, LauncherActivityCachingLogic, sectionKey.user)
-                }
-
-                iconRequestInfos.forEach { applyCacheEntry(entry, it.itemInfo) }
+                tasksList.add(
+                    object : TaskSchedule.SafelyRunnable() {
+                        override fun onTaskRun() {
+                            if (loadFallbackIcon) {
+                                loadFallbackIcon(
+                                    lai,
+                                    entry,
+                                    LauncherActivityCachingLogic,
+                                    iconRequestInfo.lookupFlag.withUsePackageIcon(false),
+                                    usePackageTitle = loadFallbackTitle,
+                                    cn,
+                                    sectionKey.user,
+                                )
+                            }
+                            if (loadFallbackTitle && TextUtils.isEmpty(entry.title) && lai != null) {
+                                loadFallbackTitle(
+                                    lai,
+                                    entry,
+                                    LauncherActivityCachingLogic,
+                                    sectionKey.user,
+                                )
+                            }
+                            iconRequestInfos.forEach { applyCacheEntry(entry, it.itemInfo) }
+                        }
+                    }
+                )
             }
         }
+        TaskSchedule.runTasks(
+            tasksList,
+            Executors.THREAD_POOL_EXECUTOR,
+            Math.max(Runtime.getRuntime().availableProcessors() / 2, 2),
+            2000,
+        )
         Trace.endSection()
     }
 
@@ -591,16 +611,29 @@ constructor(
         }
 
         // apply package override
-        if (!Flags.enableSupportForArchiving() || !info.isArchived) return
+        if (Flags.enableSupportForArchiving() && info.isArchived) {
+            val packageEntry =
+                info.targetPackage?.let { getInMemoryPackageEntryLocked(it, info.user) }
+            if (packageEntry != null && !packageEntry.bitmap.isLowRes) {
+                info.appTitle = Utilities.trim(info.title)
+                info.title = Utilities.trim(packageEntry.title)
+                info.contentDescription = packageEntry.contentDescription
+                info.bitmap = packageEntry.bitmap
+            }
+        }
 
-        val targetPackage = info.targetPackage ?: return
-        val packageEntry = getInMemoryPackageEntryLocked(targetPackage, info.user)
-        if (packageEntry == null || packageEntry.bitmap.isLowRes) return
+        // Apply the user-defined app name last so it wins over every other source. Keep the
+        // content description in sync so accessibility services announce the same name.
+        CustomAppNameStore.getCustomName(context, info)?.let { customTitle ->
+            info.title = customTitle
+            info.contentDescription = getUserBadgedLabel(customTitle, info.user)
+        }
+    }
 
-        info.appTitle = Utilities.trim(info.title)
-        info.title = Utilities.trim(packageEntry.title)
-        info.contentDescription = packageEntry.contentDescription
-        info.bitmap = packageEntry.bitmap
+    @Synchronized
+    fun clearDb() {
+        clearMemoryCache()
+        iconDb.clear()
     }
 
     fun updateSessionCache(key: PackageUserKey, info: SessionInfo) =

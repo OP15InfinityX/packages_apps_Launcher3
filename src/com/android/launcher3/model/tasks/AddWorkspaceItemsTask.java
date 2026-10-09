@@ -40,6 +40,7 @@ import com.android.launcher3.model.data.WorkspaceItemFactory;
 import com.android.launcher3.model.data.WorkspaceItemInfo;
 import com.android.launcher3.util.ApplicationInfoWrapper;
 import com.android.launcher3.util.IntSet;
+import com.android.launcher3.allapps.AppDrawerStyle;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -101,7 +102,8 @@ public class AddWorkspaceItemsTask implements ModelUpdateTask {
                     }
 
                     // b/139663018 Short-circuit this logic if the icon is a system app
-                    if (new ApplicationInfoWrapper(context, targetPackage, item.user).isSystem()) {
+                    if (!AppDrawerStyle.isIos(AppDrawerStyle.get(context))
+                            && new ApplicationInfoWrapper(context, targetPackage, item.user).isSystem()) {
                         continue;
                     }
 

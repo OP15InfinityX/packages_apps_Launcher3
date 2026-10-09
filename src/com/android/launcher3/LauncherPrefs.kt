@@ -287,6 +287,7 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         @JvmField
         val HOTSEAT_COUNT =
             backedUpItem(DeviceGridState.KEY_HOTSEAT_COUNT, -1, EncryptionType.ENCRYPTED)
+        @JvmField val ALL_APPS_DARK_TEXT = backedUpItem("pref_all_apps_dark_text", false)
         @JvmField val ALL_APPS_SEARCH_PLACEMENT = backedUpItem("pref_allapps_search_placement", "top")
         @JvmField val ALLAPPS_THEMED_ICONS = backedUpItem("pref_allapps_themed_icons", true)
         @JvmField val ALLAPPS_ICON_CUSTOMIZATION =
@@ -294,7 +295,13 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
                 ALLAPPS_THEMED_ICONS.get(it)
             }
         @JvmField val ALLOW_WALLPAPER_ZOOMING = backedUpItem("pref_allow_wallpaper_zooming", false)
+        @JvmField val APP_DRAWER_CUSTOM_COLOR_ENABLED = backedUpItem("pref_app_drawer_custom_color_enabled", false)
+        @JvmField val APP_DRAWER_CUSTOM_COLOR_LIGHT = backedUpItem("pref_app_drawer_custom_color_light", -1) // #FFFFFFFF
+        @JvmField val APP_DRAWER_CUSTOM_COLOR_DARK = backedUpItem("pref_app_drawer_custom_color_dark", -16777216) // #FF000000
         @JvmField val APP_DRAWER_OPACITY = backedUpItem("pref_app_drawer_opacity", 100)
+        @JvmField val APP_DRAWER_SORT_MODE = backedUpItem("pref_app_drawer_sorting_mode", "alphabetical")
+        @JvmField val APP_DRAWER_STYLE = backedUpItem("pref_app_drawer_style", "normal")
+        @JvmField val APP_DRAWER_STYLE_IOS_MIGRATED = nonRestorableItem("pref_app_drawer_style_ios_migrated", false)
         @JvmField val AUTO_HIDE_DOTS = backedUpItem("pref_auto_hide_dots", true)
         @JvmField val BLUR_DEPTH = backedUpItem("pref_blur_depth", 60)
         @JvmField val DARK_STATUS_BAR = backedUpItem("pref_dark_status_bar", false)
@@ -305,7 +312,13 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         @JvmField val QSB_OUTER_OPACITY = backedUpItem("pref_qsb_outer_opacity", 50)
         @JvmField val DRAWER_OPEN_KEYBOARD = backedUpItem("pref_drawer_open_keyboard", false)
         @JvmField val DRAWER_SCROLLBAR = backedUpItem("pref_drawer_scrollbar", true)
+        @JvmField val DRAWER_SEARCH = backedUpItem("pref_drawer_search", true)
+        @JvmField val DRAWER_LIST = backedUpItem("pref_drawer_list", true)
         @JvmField val FONT_SIZE = backedUpItem("pref_custom_font_size", 100)
+        @JvmField val FREEFORM_GESTURE = backedUpItem("pref_start_freeform_by_gesture", false)
+        @JvmField val OVERVIEW_GESTURE_ACTION = backedUpItem("pref_overview_gesture_action", "freeform")
+        @JvmField val FREEFORM_GESTURE_PROGRESS = backedUpItem("pref_start_freeform_progress", 20)
+        @JvmField val SWIPE_DOWN_TO_LOCK = backedUpItem("pref_swipe_down_to_lock", false)
         @JvmField val HOTSEAT_OPACITY = backedUpItem("pref_hotseat_opacity", 40)
         @JvmField val HOTSEAT_QSB_OPACITY = backedUpItem("pref_hotseat_qsb_opacity", 70)
         @JvmField val HOTSEAT_QSB_OUTER_OPACITY = backedUpItem("pref_hotseat_qsb_outer_opacity", 60)
@@ -316,8 +329,10 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         @JvmField val RECENTS_CLEAR_ALL = backedUpItem("pref_recents_clear_all", true)
         @JvmField val RECENTS_LENS = backedUpItem("pref_recents_lens", false)
         @JvmField val RECENTS_MEMINFO = backedUpItem("pref_recents_meminfo", false)
+        @JvmField val RECENTS_STYLE = backedUpItem("pref_recents_style", "default")
         @JvmField val RECENTS_OPACITY = backedUpItem("pref_recents_opacity", 40)
         @JvmField val RECENTS_SCREENSHOT = backedUpItem("pref_recents_screenshot", true)
+        @JvmField val RECENTS_SCROLL_VIBRATE = backedUpItem("pref_recents_scroll_vibrate", true)
         @JvmField val ROW_HEIGHT = backedUpItem("pref_row_height", 100)
         @JvmField val SHORT_PARALLAX = backedUpItem("pref_short_parallax", false)
         @JvmField val SHOW_DESKTOP_LABELS = backedUpItem("pref_desktop_show_labels", true)
@@ -326,6 +341,7 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         @JvmField val SHOW_QUICKSPACE = backedUpItem("pref_quickspace", true)
         @JvmField val SHOW_QUICKSPACE_ALT = backedUpItem("pref_quickspace_alt", false)
         @JvmField val SHOW_QUICKSPACE_CLOCK = backedUpItem("pref_quickspace_clock", true)
+        @JvmField val QUICKSPACE_CLOCK_COLOR = backedUpItem("pref_quickspace_clock_color", 0xffff0000.toInt())
         @JvmField val SHOW_QUICKSPACE_PSONALITY = backedUpItem("pref_quickspace_psonality", true)
         @JvmField val SHOW_QUICKSPACE_NOWPLAYING = backedUpItem("pref_quickspace_np", true)
         @JvmField val SHOW_QUICKSPACE_WEATHER = backedUpItem("pref_quickspace_weather", true)

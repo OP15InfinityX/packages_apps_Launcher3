@@ -25,6 +25,8 @@ import static com.android.launcher3.icons.IconNormalizer.ICON_VISIBLE_AREA_FACTO
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.res.ColorStateList;
+import android.content.res.Resources;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -36,8 +38,9 @@ import android.util.AttributeSet;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
-import android.view.View.OnTouchListener;
 import android.view.ViewGroup.MarginLayoutParams;
+
+import androidx.core.graphics.ColorUtils;
 
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.ExtendedEditText;
@@ -46,6 +49,7 @@ import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.allapps.ActivityAllAppsContainerView;
+import com.android.launcher3.allapps.AppDrawerStyle;
 import com.android.launcher3.allapps.AllAppsStore;
 import com.android.launcher3.allapps.BaseAllAppsAdapter.AdapterItem;
 import com.android.launcher3.allapps.PrivateProfileManager;
@@ -111,10 +115,23 @@ public class AppsSearchContainerLayout extends ExtendedEditText
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         // Update the width to match the grid padding
+        if (mAppsView == null) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            return;
+        }
+        // The active recycler view can be null while the paged drawer is rebuilding its pages.
+        View widthSource = mAppsView.getActiveRecyclerView();
+        if (widthSource == null) {
+            widthSource = mAppsView.getAppsRecyclerViewContainer();
+        }
+        if (widthSource == null) {
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            return;
+        }
         DeviceProfile dp = mLauncher.getDeviceProfile();
         int myRequestedWidth = getSize(widthMeasureSpec);
-        int rowWidth = myRequestedWidth - mAppsView.getActiveRecyclerView().getPaddingLeft()
-                - mAppsView.getActiveRecyclerView().getPaddingRight();
+        int rowWidth = myRequestedWidth - widthSource.getPaddingLeft()
+                - widthSource.getPaddingRight();
 
         int cellWidth = DeviceProfile.calculateCellWidth(rowWidth,
                 dp.getWorkspaceProfile().getCellLayoutBorderSpacePx().x,
@@ -149,89 +166,218 @@ public class AppsSearchContainerLayout extends ExtendedEditText
             setTranslationX(shift);
         }
 
-        boolean isDockThemed = LauncherPrefs.DOCK_THEME.get(getContext());
-        boolean hasGoogleApp = Utilities.isGSAEnabled(getContext());
+        final boolean isDockThemed = LauncherPrefs.DOCK_THEME.get(getContext());
+        final boolean hasGoogleApp = Utilities.isGSAEnabled(getContext());
+
+        Drawable startIcon;
+        Drawable endIcon = null;
 
         if (!hasGoogleApp) {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(sIconNoGsa, null, null, null);
+            startIcon = sIconNoGsa;
         } else if (!isDockThemed) {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(gIcon, null, actions, null);
+            startIcon = gIcon;
+            endIcon = actions;
         } else {
-            setCompoundDrawablesRelativeWithIntrinsicBounds(gIconThemed, null, actionsThemed,
-                    null);
+            startIcon = gIconThemed;
+            endIcon = actionsThemed;
         }
 
-        setOnTouchListener(new OnTouchListener() {
-            @Override
-            public boolean onTouch(View v, MotionEvent event) {
-                if (event.getAction() == MotionEvent.ACTION_UP) {
-                    float touchX = event.getX();
-                    Drawable rightDrawable = getCompoundDrawablesRelative()[2];
-                    Drawable leftDrawable = getCompoundDrawablesRelative()[0];
-                    int leftSlotWidth = getResources().getDimensionPixelSize(R.dimen.qsb_icon_tap_size);
-                    int actionSlotWidth =
-                            getResources().getDimensionPixelSize(R.dimen.qsb_icon_tap_size);
-                    int rightGroupWidth = actionSlotWidth * 2;
-                    int rightGroupStart = rightDrawable != null
+        // Tint monochrome icons to match custom drawer colors; never tint the colored G logo.
+        if (AppDrawerStyle.isCustomColorEnabled(getContext())) {
+            int contentColor = getSearchContentColor();
+            if (!hasGoogleApp && startIcon != null) {
+                startIcon = startIcon.mutate();
+                startIcon.setTintList(ColorStateList.valueOf(contentColor));
+            } else if (hasGoogleApp && isDockThemed) {
+                if (startIcon != null) {
+                    startIcon = startIcon.mutate();
+                    startIcon.setTintList(ColorStateList.valueOf(contentColor));
+                }
+                if (endIcon != null) {
+                    endIcon = endIcon.mutate();
+                    endIcon.setTintList(ColorStateList.valueOf(contentColor));
+                }
+            }
+        }
+        setCompoundDrawablesRelativeWithIntrinsicBounds(startIcon, null, endIcon, null);
+
+        setOnTouchListener((v, event) -> {
+            if (event.getAction() == MotionEvent.ACTION_UP) {
+                float touchX = event.getX();
+                boolean isRtl = Utilities.isRtl(getResources());
+                Drawable startDrawable = getCompoundDrawablesRelative()[0];
+                Drawable endDrawable = getCompoundDrawablesRelative()[2];
+                int leftSlotWidth =
+                        getResources().getDimensionPixelSize(R.dimen.qsb_search_icon_tap_size);
+                int actionSlotWidth =
+                        getResources().getDimensionPixelSize(R.dimen.qsb_search_icon_tap_size);
+                int rightGroupWidth = actionSlotWidth * 2;
+
+                if (!isRtl) {
+                    int startBoundary = getPaddingStart() + leftSlotWidth;
+                    int endBoundary = endDrawable != null
                             ? getWidth() - getPaddingEnd() - rightGroupWidth
                             : getWidth() - getPaddingEnd();
 
-                    if (leftDrawable != null && touchX <= (getPaddingStart() + leftSlotWidth)) {
+                    if (startDrawable != null && touchX <= startBoundary) {
                         if (hasGoogleApp) {
-                            Intent gIntent = getContext().getPackageManager()
-                                    .getLaunchIntentForPackage(Utilities.GSA_PACKAGE);
-                            if (gIntent != null) {
-                                gIntent.addFlags(
-                                        Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                                getContext().startActivity(gIntent);
-                                return true;
+                            try {
+                                Intent gIntent = getContext().getPackageManager()
+                                        .getLaunchIntentForPackage(Utilities.GSA_PACKAGE);
+                                if (gIntent != null) {
+                                    gIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                            | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                    getContext().startActivity(gIntent);
+                                    return true;
+                                }
+                            } catch (Exception ignored) {
                             }
                         }
                         return false;
                     }
 
-                    if (rightDrawable != null && touchX >= rightGroupStart) {
-                        if (touchX < (rightGroupStart + actionSlotWidth)) {
-                            String searchPackage =
-                                    Utilities.getSearchWidgetPackageName(getContext());
-                            if (searchPackage != null) {
-                                Intent voiceIntent = new Intent(Intent.ACTION_VOICE_COMMAND)
-                                        .addFlags(
-                                                Intent.FLAG_ACTIVITY_NEW_TASK
-                                                        | Intent.FLAG_ACTIVITY_CLEAR_TASK)
-                                        .setPackage(searchPackage);
+                    if (endDrawable != null && touchX >= endBoundary) {
+                        if (touchX < (endBoundary + actionSlotWidth)) {
+                            try {
+                                Intent voiceIntent = new Intent();
+                                if (Utilities.isMusicSearchEnabled(getContext())) {
+                                    voiceIntent.setAction(
+                                            "com.google.android.googlequicksearchbox.MUSIC_SEARCH");
+                                    voiceIntent.setPackage(Utilities.GSA_PACKAGE);
+                                } else {
+                                    voiceIntent.setAction(Intent.ACTION_VOICE_COMMAND);
+                                    if (Utilities.isGSAEnabled(getContext())) {
+                                        voiceIntent.setPackage(Utilities.GSA_PACKAGE);
+                                    }
+                                }
+                                voiceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
                                 getContext().startActivity(voiceIntent);
+                            } catch (Exception e) {
+                                try {
+                                    Intent fallback = new Intent(Intent.ACTION_VOICE_COMMAND)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                                    | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                    getContext().startActivity(fallback);
+                                } catch (Exception ignored) {
+                                }
                             }
                         } else {
                             if (Utilities.isGSAEnabled(getContext())) {
-                                Intent lensIntent = new Intent();
-                                lensIntent.setAction(Intent.ACTION_VIEW)
-                                        .setComponent(new ComponentName(Utilities.GSA_PACKAGE,
-                                                Utilities.LENS_ACTIVITY))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        .setPackage(Utilities.GSA_PACKAGE)
-                                        .setData(Uri.parse(Utilities.LENS_URI))
-                                        .putExtra("LensHomescreenShortcut", true);
-                                getContext().startActivity(lensIntent);
+                                try {
+                                    Intent lensIntent = new Intent();
+                                    lensIntent.setAction(Intent.ACTION_VIEW)
+                                            .setComponent(new ComponentName(Utilities.GSA_PACKAGE,
+                                                    Utilities.LENS_ACTIVITY))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            .setPackage(Utilities.GSA_PACKAGE)
+                                            .setData(Uri.parse(Utilities.LENS_URI))
+                                            .putExtra("LensHomescreenShortcut", true);
+                                    getContext().startActivity(lensIntent);
+                                } catch (Exception ignored) {
+                                }
                             }
                         }
                         return true;
                     }
 
-                    if (touchX > (getPaddingStart() + leftSlotWidth)
-                            && touchX < rightGroupStart) {
-                        Intent pixelSearchIntent = getContext().getPackageManager()
-                                .getLaunchIntentForPackage("rk.android.app.pixelsearch");
-                        if (pixelSearchIntent != null) {
-                            pixelSearchIntent.addFlags(
-                                    Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                            getContext().startActivity(pixelSearchIntent);
-                            return true;
+                    if (touchX > startBoundary && touchX < endBoundary) {
+                        try {
+                            Intent pixelSearchIntent = getContext().getPackageManager()
+                                    .getLaunchIntentForPackage("rk.android.app.pixelsearch");
+                            if (pixelSearchIntent != null) {
+                                pixelSearchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                getContext().startActivity(pixelSearchIntent);
+                                return true;
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                } else {
+                    int endBoundary = endDrawable != null
+                            ? getPaddingEnd() + rightGroupWidth
+                            : getPaddingEnd();
+                    int startBoundary = getWidth() - getPaddingStart() - leftSlotWidth;
+
+                    if (startDrawable != null && touchX >= startBoundary) {
+                        if (hasGoogleApp) {
+                            try {
+                                Intent gIntent = getContext().getPackageManager()
+                                        .getLaunchIntentForPackage(Utilities.GSA_PACKAGE);
+                                if (gIntent != null) {
+                                    gIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                            | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                    getContext().startActivity(gIntent);
+                                    return true;
+                                }
+                            } catch (Exception ignored) {
+                            }
+                        }
+                        return false;
+                    }
+
+                    if (endDrawable != null && touchX <= endBoundary) {
+                        if (touchX < (getPaddingEnd() + actionSlotWidth)) {
+                            try {
+                                Intent voiceIntent = new Intent();
+                                if (Utilities.isMusicSearchEnabled(getContext())) {
+                                    voiceIntent.setAction(
+                                            "com.google.android.googlequicksearchbox.MUSIC_SEARCH");
+                                    voiceIntent.setPackage(Utilities.GSA_PACKAGE);
+                                } else {
+                                    voiceIntent.setAction(Intent.ACTION_VOICE_COMMAND);
+                                    if (Utilities.isGSAEnabled(getContext())) {
+                                        voiceIntent.setPackage(Utilities.GSA_PACKAGE);
+                                    }
+                                }
+                                voiceIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                getContext().startActivity(voiceIntent);
+                            } catch (Exception e) {
+                                try {
+                                    Intent fallback = new Intent(Intent.ACTION_VOICE_COMMAND)
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                                    | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                    getContext().startActivity(fallback);
+                                } catch (Exception ignored) {
+                                }
+                            }
+                        } else {
+                            if (Utilities.isGSAEnabled(getContext())) {
+                                try {
+                                    Intent lensIntent = new Intent();
+                                    lensIntent.setAction(Intent.ACTION_VIEW)
+                                            .setComponent(new ComponentName(Utilities.GSA_PACKAGE,
+                                                    Utilities.LENS_ACTIVITY))
+                                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            .setPackage(Utilities.GSA_PACKAGE)
+                                            .setData(Uri.parse(Utilities.LENS_URI))
+                                            .putExtra("LensHomescreenShortcut", true);
+                                    getContext().startActivity(lensIntent);
+                                } catch (Exception ignored) {
+                                }
+                            }
+                        }
+                        return true;
+                    }
+
+                    if (touchX > endBoundary && touchX < startBoundary) {
+                        try {
+                            Intent pixelSearchIntent = getContext().getPackageManager()
+                                    .getLaunchIntentForPackage("rk.android.app.pixelsearch");
+                            if (pixelSearchIntent != null) {
+                                pixelSearchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                        | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                getContext().startActivity(pixelSearchIntent);
+                                return true;
+                            }
+                        } catch (Exception ignored) {
                         }
                     }
                 }
-                return false;
             }
+            return false;
         });
 
         offsetTopAndBottom(mContentOverlap);
@@ -241,10 +387,11 @@ public class AppsSearchContainerLayout extends ExtendedEditText
 
     private void setUpBackground() {
         Context context = getContext();
-        float cornerRadius = getHeight() / 2f;
-        int color = Themes.getAttrColor(context, R.attr.qsbFillColor);
-        if (LauncherPrefs.DOCK_THEME.get(context))
-            color = Themes.getAttrColor(context, R.attr.qsbFillColorThemed);
+        float cornerRadius = getCornerRadius(context);
+        int color = Themes.getAttrColor(context, LauncherPrefs.DOCK_THEME.get(context)
+                ? R.attr.qsbFillColorThemed : R.attr.qsbFillColor);
+        // Follows a custom drawer color; otherwise keeps the stock (or themed) fill.
+        color = AppDrawerStyle.getSearchBackgroundColor(context, color);
 
         GradientDrawable pd = new GradientDrawable();
         pd.setShape(GradientDrawable.RECTANGLE);
@@ -252,6 +399,29 @@ public class AppsSearchContainerLayout extends ExtendedEditText
         pd.setCornerRadius(cornerRadius);
         setClipToOutline(cornerRadius > 0);
         setBackground(pd);
+        if (AppDrawerStyle.isCustomColorEnabled(context)) {
+            int contentColor = getSearchContentColor();
+            setTextColor(contentColor);
+            setHintTextColor(ColorUtils.setAlphaComponent(contentColor,
+                    AppDrawerStyle.HINT_ALPHA));
+        }
+    }
+
+    private int getSearchContentColor() {
+        return AppDrawerStyle.getSearchContentColor(getContext(), getCurrentTextColor());
+    }
+
+    private float getCornerRadius(Context context) {
+        float innerHeight;
+        if (getHeight() > 0) {
+            innerHeight = getHeight();
+        } else {
+            Resources res = context.getResources();
+            float qsbWidgetHeight = res.getDimension(R.dimen.qsb_widget_height);
+            float qsbWidgetPadding = res.getDimension(R.dimen.qsb_widget_vertical_padding);
+            innerHeight = qsbWidgetHeight - 2 * qsbWidgetPadding;
+        }
+        return innerHeight / 2f;
     }
 
     @Override
@@ -304,7 +474,7 @@ public class AppsSearchContainerLayout extends ExtendedEditText
 
     @Override
     public void onSearchResult(String query, ArrayList<AdapterItem> items) {
-        if (query.equalsIgnoreCase(mContext.getString(R.string.private_space_label))) {
+        if (query.equalsIgnoreCase(getContext().getString(R.string.private_space_label))) {
             privateSpaceQuery();
             return;
         }
@@ -324,8 +494,14 @@ public class AppsSearchContainerLayout extends ExtendedEditText
 
     @Override
     public void setInsets(Rect insets) {
+        if (mAppsView == null) {
+            return;
+        }
         MarginLayoutParams mlp = (MarginLayoutParams) getLayoutParams();
-        mlp.topMargin = getResources().getDimensionPixelSize(R.dimen.all_apps_search_bar_margin_top);
+        if (mAppsView.getSearchUiDelegate().isSearchBarFloating()
+                || mLauncher.getDeviceProfile().getDeviceProperties().isLargeScreen()) {
+            mlp.topMargin = insets.top;
+        }
         requestLayout();
     }
 
@@ -340,7 +516,7 @@ public class AppsSearchContainerLayout extends ExtendedEditText
             privateProfileManager.setQuietMode(false);
         } else if (!mAppsView.hasPrivateProfile()) {
             final Intent privateSpaceSettingsIntent =
-                    ApiWrapper.INSTANCE.get(mContext).getPrivateSpaceSettingsIntent();
+                    ApiWrapper.INSTANCE.get(getContext()).getPrivateSpaceSettingsIntent();
             if (privateSpaceSettingsIntent != null) {
                 mLauncher.startActivitySafely(mAppsView, privateSpaceSettingsIntent, null);
             }

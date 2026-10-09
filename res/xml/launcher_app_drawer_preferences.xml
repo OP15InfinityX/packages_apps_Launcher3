@@ -19,6 +19,26 @@
     xmlns:launcher="http://schemas.android.com/apk/res-auto"
     xmlns:settings="http://schemas.android.com/apk/res/com.android.launcher3">
 
+    <ListPreference
+        android:key="pref_app_drawer_style"
+        android:title="@string/drawer_style_title"
+        android:summary="%s"
+        android:entries="@array/app_drawer_style_entries"
+        android:entryValues="@array/app_drawer_style_values"
+        android:defaultValue="normal"
+        android:persistent="true"
+        launcher:iconSpaceReserved="false" />
+
+    <ListPreference
+        android:key="pref_app_drawer_sorting_mode"
+        android:title="@string/app_drawer_sort_mode_title"
+        android:summary="%s"
+        android:entries="@array/app_drawer_sort_mode_entries"
+        android:entryValues="@array/app_drawer_sort_mode_values"
+        android:defaultValue="alphabetical"
+        android:persistent="true"
+        launcher:iconSpaceReserved="false" />
+
     <com.android.launcher3.settings.preferences.CustomSeekBarPreference
         android:key="pref_app_drawer_opacity"
         android:title="@string/background_opacity_title"
@@ -27,6 +47,39 @@
         android:min="0"
         settings:units="%"
         android:defaultValue="100" />
+
+    <SwitchPreferenceCompat
+        android:key="pref_app_drawer_custom_color_enabled"
+        android:title="@string/pref_app_drawer_custom_color_title"
+        android:summary="@string/pref_app_drawer_custom_color_summary"
+        android:defaultValue="false"
+        android:persistent="true"
+        launcher:iconSpaceReserved="false" />
+
+    <!-- Opaque colors only: translucency comes from the background opacity setting above. -->
+    <com.android.launcher3.settings.preferences.colorpicker.ColorPickerPreference
+        android:key="pref_app_drawer_custom_color_light"
+        android:title="@string/pref_app_drawer_custom_color_light_title"
+        android:defaultValue="#FFFFFFFF"
+        android:dependency="pref_app_drawer_custom_color_enabled"
+        android:persistent="true"
+        launcher:iconSpaceReserved="false" />
+
+    <com.android.launcher3.settings.preferences.colorpicker.ColorPickerPreference
+        android:key="pref_app_drawer_custom_color_dark"
+        android:title="@string/pref_app_drawer_custom_color_dark_title"
+        android:defaultValue="#FF000000"
+        android:dependency="pref_app_drawer_custom_color_enabled"
+        android:persistent="true"
+        launcher:iconSpaceReserved="false" />
+
+    <SwitchPreferenceCompat
+        android:key="pref_drawer_list"
+        android:title="@string/drawer_list_title"
+        android:summary="@string/drawer_list_summary"
+        android:defaultValue="true"
+        android:persistent="true"
+        launcher:iconSpaceReserved="false" />
 
     <SwitchPreferenceCompat
         android:key="pref_allapps_icon_customization"
@@ -73,6 +126,15 @@
         android:title="@string/icon_two_lines_title"
         android:defaultValue="false"
         android:persistent="true"
+        launcher:iconSpaceReserved="false" />
+
+    <SwitchPreferenceCompat
+        android:key="pref_all_apps_dark_text"
+        android:title="@string/all_apps_dark_text_title"
+        android:summary="@string/all_apps_dark_text_summary"
+        android:defaultValue="false"
+        android:persistent="true"
+        android:dependency="pref_drawer_show_labels"
         launcher:iconSpaceReserved="false" />
 
     <com.android.launcher3.settings.preferences.CustomSeekBarPreference

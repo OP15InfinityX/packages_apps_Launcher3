@@ -49,10 +49,19 @@ data class DeviceProperties(
     val insets: Rect,
     val deviceConfiguration: DeviceConfiguration,
     val taskbarConfiguration: TaskbarConfiguration,
+    val densityDpi: Int,
+    val isDefaultLandscape: Boolean
 ) {
 
+    /**
+     * Whether the navigation bar is allowed to move to the side of the display in landscape. Large
+     * screens always keep it at the bottom, mirroring the framework's config_navBarCanMove.
+     */
+    val canNavBarMove: Boolean
+        get() = isPhone
+
     fun createWindowBounds() =
-        WindowBounds(widthPx, heightPx, availableWidthPx, availableHeightPx, rotationHint)
+        WindowBounds(widthPx, heightPx, availableWidthPx, availableHeightPx, rotationHint, densityDpi)
 
     companion object Factory {
         // b/419264328 adding here all the improvements/cleanup for this class
@@ -96,6 +105,8 @@ data class DeviceProperties(
                                 (taskbarOrBubbleBarOnPhones &&
                                     deviceConfiguration.isGestureMode)) && isTaskbarDrawnInProcess
                     ),
+                densityDpi = windowBounds.densityDpi,
+                isDefaultLandscape = info.isDefaultLandscape,
             )
         }
     }

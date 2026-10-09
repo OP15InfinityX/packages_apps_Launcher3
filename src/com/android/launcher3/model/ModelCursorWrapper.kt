@@ -24,6 +24,8 @@ import com.android.launcher3.LauncherSettings.Favorites.APPWIDGET_SOURCE
 import com.android.launcher3.LauncherSettings.Favorites.CELLX
 import com.android.launcher3.LauncherSettings.Favorites.CELLY
 import com.android.launcher3.LauncherSettings.Favorites.CONTAINER
+import com.android.launcher3.LauncherSettings.Favorites.COVER_TEXT
+import com.android.launcher3.LauncherSettings.Favorites.FOLDER_STYLE
 import com.android.launcher3.LauncherSettings.Favorites.ICON
 import com.android.launcher3.LauncherSettings.Favorites.INTENT
 import com.android.launcher3.LauncherSettings.Favorites.ITEM_TYPE
@@ -57,6 +59,8 @@ open class ModelCursorWrapper(cursor: Cursor, private val queriedColumns: Array<
     val itemType: Int by ITEM_TYPE.delegateInt()
 
     val restoreFlagOnDisk: Int by RESTORED.delegateInt()
+    val folderStyle: Int by FOLDER_STYLE.delegateInt()
+    val coverText: String? by COVER_TEXT.delegateString()
 
     /** When loading an app widget for the workspace, returns it's app widget id */
     val appWidgetId: Int by APPWIDGET_ID.delegateInt()

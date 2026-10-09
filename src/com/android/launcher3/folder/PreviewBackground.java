@@ -31,6 +31,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
@@ -44,8 +45,10 @@ import android.view.animation.Interpolator;
 import androidx.annotation.VisibleForTesting;
 
 import com.android.launcher3.CellLayout;
+import com.android.launcher3.celllayout.CellLayoutLayoutParams;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Flags;
+import com.android.launcher3.LauncherSettings;
 import com.android.launcher3.R;
 import com.android.launcher3.celllayout.DelegatedCellDrawing;
 import com.android.launcher3.graphics.PathWrapper;
@@ -94,6 +97,8 @@ public class PreviewBackground extends DelegatedCellDrawing {
     // When the PreviewBackground is drawn under an icon (for creating a folder) the border
     // should not occlude the icon
     public boolean isClipping = true;
+
+    private int mFolderStyle = LauncherSettings.Favorites.FOLDER_STYLE_QUADRANT;
 
     // Drawing / animation configurations
     @VisibleForTesting protected static final float ACCEPT_SCALE_FACTOR = 1.20f;
@@ -176,8 +181,47 @@ public class PreviewBackground extends DelegatedCellDrawing {
         DeviceProfile grid = activity.getDeviceProfile();
         previewSize = grid.getFolderProfile().getFolderIconSizePx();
 
+        boolean isEnlarged = availableSpaceX > grid.getWorkspaceProfile().getIconSizePx() * 1.5;
+        boolean enlargedBySpaceCheck = isEnlarged;
+        boolean enlargedByInfoSpan = false;
+        boolean enlargedByLayoutParams = false;
+        int infoSpanX = 0, infoSpanY = 0;
+        int lpSpanX = 0, lpSpanY = 0;
+
+        if (invalidateDelegate instanceof FolderIcon) {
+            FolderIcon fi = (FolderIcon) invalidateDelegate;
+            if (fi.mInfo != null) {
+                infoSpanX = fi.mInfo.spanX;
+                infoSpanY = fi.mInfo.spanY;
+                if (infoSpanX == 2 && infoSpanY == 2) {
+                    isEnlarged = true;
+                    enlargedByInfoSpan = true;
+                }
+            }
+            if (!isEnlarged && fi.getLayoutParams() instanceof CellLayoutLayoutParams) {
+                CellLayoutLayoutParams lp = (CellLayoutLayoutParams) fi.getLayoutParams();
+                lpSpanX = lp.cellHSpan;
+                lpSpanY = lp.cellVSpan;
+                if (lpSpanX >= 2 && lpSpanY >= 2) {
+                    isEnlarged = true;
+                    enlargedByLayoutParams = true;
+                }
+            }
+        }
+
+        if (isEnlarged) {
+            int targetSize = (int) (availableSpaceX * 0.85f);
+            if (targetSize > previewSize) {
+                previewSize = targetSize;
+            }
+        }
+
         basePreviewOffsetX = (availableSpaceX - previewSize) / 2;
-        basePreviewOffsetY = topPadding + grid.getFolderProfile().getFolderIconOffsetYPx();
+        if (isEnlarged) {
+            basePreviewOffsetY = topPadding;
+        } else {
+            basePreviewOffsetY = topPadding + grid.getFolderProfile().getFolderIconOffsetYPx();
+        }
 
         // Stroke width is 1dp
         mStrokeWidth = context.getResources().getDisplayMetrics().density;
@@ -189,9 +233,18 @@ public class PreviewBackground extends DelegatedCellDrawing {
             mShadowShader = new RadialGradient(0, 0, 1,
                     new int[]{shadowColor, Color.TRANSPARENT},
                     new float[]{radius / shadowRadius, 1},
-                    Shader.TileMode.CLAMP);
+                    Shader.TileMode.MIRROR);
         }
 
+        if (invalidateDelegate instanceof FolderIcon) {
+            mFolderStyle = ((FolderIcon) invalidateDelegate).getFolderStyle();
+        }
+
+        invalidate();
+    }
+
+    public void updateFolderStyle(int style) {
+        mFolderStyle = style;
         invalidate();
     }
 
@@ -250,7 +303,16 @@ public class PreviewBackground extends DelegatedCellDrawing {
         mPaint.setStyle(Paint.Style.FILL);
         mPaint.setColor(getBgColor());
 
-        getShape().drawShape(canvas, getOffsetX(), getOffsetY(), getScaledRadius(), mPaint);
+        if (mFolderStyle == LauncherSettings.Favorites.FOLDER_STYLE_GRID) {
+            float radius = previewSize * 0.15f;
+            float size = previewSize * mScale;
+            float offset = (previewSize - size) / 2;
+            float left = getOffsetX() + offset;
+            float top = getOffsetY() + offset;
+            canvas.drawRoundRect(left, top, left + size, top + size, radius, radius, mPaint);
+        } else {
+            getShape().drawShape(canvas, getOffsetX(), getOffsetY(), getScaledRadius(), mPaint);
+        }
         drawShadow(canvas);
     }
 
@@ -367,15 +429,26 @@ public class PreviewBackground extends DelegatedCellDrawing {
 
     public PathWrapper getClipPath() {
         mPath.reset();
-        float radius = getScaledRadius();
-        if (!Flags.enableLauncherIconShapes()) {
-            radius = radius * ICON_OVERLAP_FACTOR;
+        if (mFolderStyle == LauncherSettings.Favorites.FOLDER_STYLE_GRID) {
+            float size = previewSize * mScale * ICON_OVERLAP_FACTOR;
+            float radius = previewSize * 0.15f;
+            float offset = (previewSize - size) / 2;
+            float left = basePreviewOffsetX + offset;
+            float top = basePreviewOffsetY + offset;
+            mPath.getPath().addRoundRect(left, top, left + size, top + size, radius, radius, Path.Direction.CW);
+            mPath.setBounds(left, top, left + size, top + size);
+            mPath.setCornerRadius(radius);
+        } else {
+            float radius = getScaledRadius();
+            if (!Flags.enableLauncherIconShapes()) {
+                radius = radius * ICON_OVERLAP_FACTOR;
+            }
+            // Find the difference in radius so that the clip path remains centered.
+            float radiusDifference = radius - getRadius();
+            float offsetX = basePreviewOffsetX - radiusDifference;
+            float offsetY = basePreviewOffsetY - radiusDifference;
+            getShape().addToPath(mPath, offsetX, offsetY, radius);
         }
-        // Find the difference in radius so that the clip path remains centered.
-        float radiusDifference = radius - getRadius();
-        float offsetX = basePreviewOffsetX - radiusDifference;
-        float offsetY = basePreviewOffsetY - radiusDifference;
-        getShape().addToPath(mPath, offsetX, offsetY, radius);
         return mPath;
     }
 

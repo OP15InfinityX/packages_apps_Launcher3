@@ -58,12 +58,17 @@ import static com.android.launcher3.popup.SystemShortcut.ADD_TO_HOME_SCREEN;
 import static com.android.launcher3.popup.SystemShortcut.APP_INFO;
 import static com.android.launcher3.popup.SystemShortcut.APP_LOCK;
 import static com.android.launcher3.popup.SystemShortcut.BUBBLE_SHORTCUT;
+import static com.android.launcher3.popup.SystemShortcut.CUSTOM_ICON;
+import static com.android.launcher3.popup.SystemShortcut.CUSTOMIZE_FOLDER;
 import static com.android.launcher3.popup.SystemShortcut.DONT_SUGGEST_APP;
+import static com.android.launcher3.popup.SystemShortcut.ENLARGE;
 import static com.android.launcher3.popup.SystemShortcut.FLOATING;
 import static com.android.launcher3.popup.SystemShortcut.INSTALL;
 import static com.android.launcher3.popup.SystemShortcut.KILL_APP;
+import static com.android.launcher3.popup.SystemShortcut.MINIMIZE;
 import static com.android.launcher3.popup.SystemShortcut.PRIVATE_PROFILE_INSTALL;
 import static com.android.launcher3.popup.SystemShortcut.REMOVE;
+import static com.android.launcher3.popup.SystemShortcut.RENAME_APP;
 import static com.android.launcher3.popup.SystemShortcut.UNINSTALL;
 import static com.android.launcher3.popup.SystemShortcut.UNINSTALL_APP;
 import static com.android.launcher3.popup.SystemShortcut.WIDGETS;
@@ -570,7 +575,8 @@ public class QuickstepLauncher extends Launcher implements RecentsViewContainer,
     public Stream<SystemShortcut.Factory> getSupportedShortcuts(ItemInfo itemInfo) {
         // Order matters as it affects order of appearance in popup container
         List<SystemShortcut.Factory> shortcuts = new ArrayList(Arrays.asList(
-                APP_INFO, WellbeingModel.SHORTCUT_FACTORY, mHotseatPredictionController));
+                APP_INFO, WellbeingModel.SHORTCUT_FACTORY, mHotseatPredictionController,
+                RENAME_APP, CUSTOM_ICON));
         int container = itemInfo.container;
         if (canPinAppWithContextMenu()
                 && DisplayController.getInfo(this).getShowDesktopTaskbarForFreeformDisplay()
@@ -600,6 +606,11 @@ public class QuickstepLauncher extends Launcher implements RecentsViewContainer,
                 && (container == CONTAINER_ALL_APPS
                 || container == CONTAINER_ALL_APPS_PREDICTION)) {
             shortcuts.add(ADD_TO_HOME_SCREEN);
+        }
+        if (container == CONTAINER_DESKTOP || container == CONTAINER_HOTSEAT) {
+            shortcuts.add(ENLARGE);
+            shortcuts.add(MINIMIZE);
+            shortcuts.add(CUSTOMIZE_FOLDER);
         }
         shortcuts.add(DONT_SUGGEST_APP);
         shortcuts.add(PRIVATE_PROFILE_INSTALL);
@@ -810,16 +821,22 @@ public class QuickstepLauncher extends Launcher implements RecentsViewContainer,
                 list.add(getDeviceProfile().isVerticalBarLayout()
                         ? new TransposedQuickSwitchTouchController(this)
                         : new QuickSwitchTouchController(this));
-                list.add(new PortraitStatesTouchController(this));
+                if (canOpenAllApps()) {
+                    list.add(new PortraitStatesTouchController(this));
+                }
                 break;
             case THREE_BUTTONS:
                 list.add(new NoButtonQuickSwitchTouchController(this));
                 list.add(new NavBarToHomeTouchController(this, splitAnimator));
                 list.add(new NoButtonNavbarToOverviewTouchController(this, splitAnimator));
-                list.add(new PortraitStatesTouchController(this));
+                if (canOpenAllApps()) {
+                    list.add(new PortraitStatesTouchController(this));
+                }
                 break;
             default:
-                list.add(new PortraitStatesTouchController(this));
+                if (canOpenAllApps()) {
+                    list.add(new PortraitStatesTouchController(this));
+                }
                 break;
         }
         list.add(new StatusBarTouchController(this, () -> this.isInState(LauncherState.NORMAL)));

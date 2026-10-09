@@ -48,6 +48,9 @@ import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
 import com.android.launcher3.util.VibratorWrapper;
+import androidx.preference.SwitchPreferenceCompat;
+import com.android.launcher3.SessionCommitReceiver;
+import com.android.launcher3.allapps.AppDrawerStyle;
 
 import com.android.settingslib.collapsingtoolbar.CollapsingToolbarBaseActivity;
 import com.android.settingslib.widget.SettingsBasePreferenceFragment;
@@ -122,6 +125,7 @@ public class SettingsHomescreen extends CollapsingToolbarBaseActivity
                 LauncherPrefs.SHOW_QUICKSPACE.getSharedPrefKey().equals(key) ||
                 LauncherPrefs.SHOW_QUICKSPACE_ALT.getSharedPrefKey().equals(key) ||
                 LauncherPrefs.SHOW_QUICKSPACE_CLOCK.getSharedPrefKey().equals(key) ||
+                LauncherPrefs.QUICKSPACE_CLOCK_COLOR.getSharedPrefKey().equals(key) ||
                 LauncherPrefs.SHOW_QUICKSPACE_PSONALITY.getSharedPrefKey().equals(key) ||
                 LauncherPrefs.SHOW_QUICKSPACE_NOWPLAYING.getSharedPrefKey().equals(key) ||
                 LauncherPrefs.SHOW_QUICKSPACE_WEATHER.getSharedPrefKey().equals(key) ||
@@ -175,9 +179,12 @@ public class SettingsHomescreen extends CollapsingToolbarBaseActivity
     /**
      * This fragment shows the launcher preferences.
      */
-    public static class HomescreenSettingsFragment extends SettingsBasePreferenceFragment {
+    public static class HomescreenSettingsFragment extends SettingsBasePreferenceFragment implements
+            SharedPreferences.OnSharedPreferenceChangeListener {
 
         private boolean mRestartOnResume = false;
+
+        private SwitchPreferenceCompat mAutoAddIconsPref;
 
         private String mHighLightKey;
 
@@ -221,7 +228,9 @@ public class SettingsHomescreen extends CollapsingToolbarBaseActivity
             mDockMusicSearchPref = screen.findPreference(LauncherPrefs.DOCK_MUSIC_SEARCH.getSharedPrefKey());
             mDockThemePref = screen.findPreference(LauncherPrefs.DOCK_THEME.getSharedPrefKey());
             mSearchRadiusSizePref = screen.findPreference(LauncherPrefs.SEARCH_RADIUS_SIZE.getSharedPrefKey());
+            mAutoAddIconsPref = screen.findPreference(SessionCommitReceiver.ADD_ICON_PREFERENCE_KEY);
             updateIsGoogleAppEnabled();
+            updateAutoAddIconsPreferenceState();
 
             if (!VibratorWrapper.INSTANCE.get(getContext()).hasVibrator()) {
                 PreferenceCategory generalCategory = (PreferenceCategory) findPreference(KEY_GENERAL_CATEGORY);
@@ -248,6 +257,9 @@ public class SettingsHomescreen extends CollapsingToolbarBaseActivity
             if (getActivity() != null && !TextUtils.isEmpty(getPreferenceScreen().getTitle())) {
                 getActivity().setTitle(getPreferenceScreen().getTitle());
             }
+
+            getPreferenceManager().getSharedPreferences()
+                    .registerOnSharedPreferenceChangeListener(this);
         }
 
         private boolean isKeyInPreferenceGroup(String targetKey, PreferenceGroup parent) {
@@ -348,9 +360,42 @@ public class SettingsHomescreen extends CollapsingToolbarBaseActivity
                 }
             }
             updateIsGoogleAppEnabled();
+            updateAutoAddIconsPreferenceState();
 
             if (mRestartOnResume) {
                 recreateActivityNow();
+            }
+        }
+
+        @Override
+        public void onDestroy() {
+            super.onDestroy();
+            getPreferenceManager().getSharedPreferences()
+                    .unregisterOnSharedPreferenceChangeListener(this);
+        }
+
+        @Override
+        public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+            if (LauncherPrefs.APP_DRAWER_STYLE.getSharedPrefKey().equals(key)) {
+                updateAutoAddIconsPreferenceState();
+            }
+        }
+
+        private void updateAutoAddIconsPreferenceState() {
+            if (mAutoAddIconsPref == null || getContext() == null) {
+                return;
+            }
+            boolean iosStyle = AppDrawerStyle.isIos(AppDrawerStyle.get(getContext()));
+            if (iosStyle) {
+                mAutoAddIconsPref.setChecked(true);
+                LauncherPrefs.getPrefs(getContext()).edit()
+                        .putBoolean(SessionCommitReceiver.ADD_ICON_PREFERENCE_KEY, true)
+                        .apply();
+                mAutoAddIconsPref.setEnabled(false);
+                mAutoAddIconsPref.setSummary(R.string.auto_add_shortcuts_forced_ios_summary);
+            } else {
+                mAutoAddIconsPref.setEnabled(true);
+                mAutoAddIconsPref.setSummary(R.string.auto_add_shortcuts_description);
             }
         }
 

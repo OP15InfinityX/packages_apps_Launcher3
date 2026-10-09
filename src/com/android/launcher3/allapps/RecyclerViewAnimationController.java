@@ -90,6 +90,8 @@ public class RecyclerViewAnimationController {
         Integer top = null;
         AllAppsRecyclerView allAppsRecyclerView = getRecyclerView();
 
+        List<BaseAllAppsAdapter.AdapterItem> allAppsAdapters = allAppsRecyclerView.getApps().getAdapterItems();
+
         for (int i = 0; i < allAppsRecyclerView.getChildCount(); i++) {
             View currentView = allAppsRecyclerView.getChildAt(i);
             if (currentView == null) {
@@ -99,8 +101,6 @@ public class RecyclerViewAnimationController {
                 top = currentView.getTop();
             }
             int adapterPosition = allAppsRecyclerView.getChildAdapterPosition(currentView);
-            List<BaseAllAppsAdapter.AdapterItem> allAppsAdapters = allAppsRecyclerView.getApps()
-                    .getAdapterItems();
             if (adapterPosition < 0 || adapterPosition >= allAppsAdapters.size()) {
                 continue;
             }
@@ -188,7 +188,28 @@ public class RecyclerViewAnimationController {
             duration = 0;
         }
 
-        mAnimator.addListener(forEndCallback(() -> mAnimator = null));
+        mAnimator.addListener(forEndCallback(() -> {
+            mAnimator = null;
+            AllAppsRecyclerView rv = getRecyclerView();
+            for (int i = 0; i < rv.getChildCount(); i++) {
+                rv.getChildAt(i).setLayerType(View.LAYER_TYPE_NONE, null);
+            }
+        }));
+        mAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationStart(android.animation.Animator animation) {
+                AllAppsRecyclerView rv = getRecyclerView();
+                List<BaseAllAppsAdapter.AdapterItem> allAppsAdapters =
+                        rv.getApps().getAdapterItems();
+                for (int i = 0; i < rv.getChildCount(); i++) {
+                    View child = rv.getChildAt(i);
+                    if (shouldAnimateView(child, rv.getChildAdapterPosition(child),
+                            allAppsAdapters)) {
+                        child.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+                    }
+                }
+            }
+        });
         mAnimator.setDuration(duration).setInterpolator(timeInterpolator);
         mAnimator.addListener(forSuccessCallback(onEndRunnable));
         mAnimator.start();
@@ -199,6 +220,15 @@ public class RecyclerViewAnimationController {
     private void onChildAttached(View child) {
         // Avoid allocating hardware layers for alpha changes.
         child.forceHasOverlappingRendering(false);
+        // Use HW layer for newly attached children only if they will animate
+        if (isRunning()) {
+            int adapterPosition = getRecyclerView().getChildAdapterPosition(child);
+            List<BaseAllAppsAdapter.AdapterItem> allAppsAdapters =
+                    getRecyclerView().getApps().getAdapterItems();
+            if (shouldAnimateView(child, adapterPosition, allAppsAdapters)) {
+                child.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            }
+        }
         child.setPivotY(0);
         if (getAnimationProgress() > 0 && getAnimationProgress() < 1) {
             // Before the child is rendered, apply the animation including it to avoid flicker.
@@ -256,6 +286,16 @@ public class RecyclerViewAnimationController {
     /** Returns true if a transition animation is currently in progress. */
     protected boolean isRunning() {
         return mAnimator != null;
+    }
+
+    /** Returns true if the view should animate and needs a hardware layer. */
+    private boolean shouldAnimateView(View view, int adapterPosition,
+            List<BaseAllAppsAdapter.AdapterItem> allAppsAdapters) {
+        if (adapterPosition < 0 || adapterPosition >= allAppsAdapters.size()) {
+            return false;
+        }
+        BaseAllAppsAdapter.AdapterItem adapterItem = allAppsAdapters.get(adapterPosition);
+        return shouldAnimate(view, adapterItem.getDecorationInfo() != null, false);
     }
 
     /** Should only animate if the view is an app icon and if it has a decoration info. */

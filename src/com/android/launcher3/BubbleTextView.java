@@ -42,6 +42,7 @@ import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_AUTOMATED;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_INCREMENTAL_DOWNLOAD_ACTIVE;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_INSTALL_SESSION_ACTIVE;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_SHOW_DOWNLOAD_PROGRESS_MASK;
+import static com.android.launcher3.util.Executors.MODEL_EXECUTOR;
 import static com.android.launcher3.util.MultiTranslateDelegate.INDEX_TASKBAR_APP_RUNNING_STATE_ANIM;
 
 import android.animation.Animator;
@@ -49,6 +50,8 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.content.pm.LauncherActivityInfo;
+import android.content.pm.LauncherApps;
 import android.content.res.ColorStateList;
 import android.content.res.TypedArray;
 import android.graphics.Canvas;
@@ -84,6 +87,9 @@ import androidx.annotation.UiThread;
 import androidx.annotation.VisibleForTesting;
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 
+import com.android.launcher3.InvariantDeviceProfile;
+import com.android.launcher3.LauncherAppState;
+import com.android.launcher3.LauncherSettings;
 import com.android.launcher3.accessibility.BaseAccessibilityDelegate;
 import com.android.launcher3.anim.AnimatedFloat;
 import com.android.launcher3.apppairs.AppPairIcon;
@@ -94,6 +100,8 @@ import com.android.launcher3.folder.FolderIcon;
 import com.android.launcher3.graphics.AutomatedIconDelegate;
 import com.android.launcher3.graphics.PreloadIconDelegate;
 import com.android.launcher3.graphics.ThemeManager;
+import com.android.launcher3.icons.BaseIconFactory;
+import com.android.launcher3.icons.BitmapInfo;
 import com.android.launcher3.icons.BitmapInfo.DrawableCreationFlags;
 import com.android.launcher3.icons.DotRenderer;
 import com.android.launcher3.icons.DotRenderer.IconShapeInfo;
@@ -148,6 +156,7 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     public static final int DISPLAY_SEARCH_RESULT_SMALL = 7;
     public static final int DISPLAY_PREDICTION_ROW = 8;
     public static final int DISPLAY_SEARCH_RESULT_APP_ROW = 9;
+    private static final int DISPLAY_DRAWER_FOLDER = 10;
 
     private static final float MIN_LETTER_SPACING = -0.05f;
     private static final int MAX_SEARCH_LOOP_COUNT = 20;
@@ -195,6 +204,8 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     private boolean mLayoutHorizontal;
     private final boolean mIsRtl;
     private final int mIconSize;
+    private int mIconSizeDesktop = 0;
+    private boolean mHighResEnlargeLoaded;
 
     @ViewDebug.ExportedProperty(category = "launcher")
     private boolean mHideBadge = false;
@@ -440,7 +451,8 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     private boolean displayIsAppDrawer() {
         return (mDisplay == DISPLAY_ALL_APPS 
                 || mDisplay == DISPLAY_PREDICTION_ROW
-                || mDisplay == DISPLAY_SEARCH_RESULT_APP_ROW);
+                || mDisplay == DISPLAY_SEARCH_RESULT_APP_ROW
+                || mDisplay == DISPLAY_DRAWER_FOLDER);
     }
 
     @Override
@@ -471,6 +483,8 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
 
         mLineIndicatorColor = Color.TRANSPARENT;
         mLineIndicatorWidth = 0;
+        mIconSizeDesktop = 0;
+        mHighResEnlargeLoaded = false;
 
         setTag(null);
         if (mIconLoadRequest != null) {
@@ -1069,7 +1083,7 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
      * Get the icon bounds on the view depending on the layout type.
      */
     public void getIconBounds(Rect outBounds) {
-        getIconBounds(mIconSize, outBounds);
+        getIconBounds(getCustomIconSize(), outBounds);
     }
 
     /**
@@ -1111,7 +1125,36 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int height = MeasureSpec.getSize(heightMeasureSpec);
-        if (mCenterVertically || !mShouldShowLabel) {
+        int width = MeasureSpec.getSize(widthMeasureSpec);
+
+        boolean isEnlarge = false;
+
+        int iconSize = mIconSize;
+
+        Object tag = getTag();
+        if (tag instanceof ItemInfoWithIcon info
+                && info.container == LauncherSettings.Favorites.CONTAINER_DESKTOP) {
+            if (info.spanX == 2 && info.spanY == 2) {
+                iconSize = Math.min(width, height);
+                resizeIconIfNeeded(iconSize);
+                maybeLoadHighResIcon(info, iconSize);
+                isEnlarge = true;
+            } else if (info.spanX == 1 && info.spanY == 1) {
+                iconSize = mIconSize;
+                mHighResEnlargeLoaded = false;
+                resizeIconIfNeeded(iconSize);
+                if (mIconSizeDesktop > mIconSize) {
+                    setContainerTextVisibility(true);
+                    applyLabel(info);
+                }
+            }
+            mIconSizeDesktop = iconSize;
+        }
+
+        if (isEnlarge) {
+            setPadding(getPaddingLeft(), (height - iconSize) / 2, getPaddingRight(),
+                    getPaddingBottom());
+        } else if ((mCenterVertically || !mShouldShowLabel) && !mLayoutHorizontal) {
             Paint.FontMetrics fm = getPaint().getFontMetrics();
             int textHeight = mShouldShowLabel ? (int) Math.ceil(fm.bottom - fm.top) * getCellSpecMaxTextLineCount(): 0;
             int cellHeightPx = mIconSize + getCompoundDrawablePadding() + textHeight;
@@ -1158,6 +1201,10 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
                     setMaxLines(1);
                 }
             }
+        }
+        if (isEnlarge) {
+            setText(null);
+            setContainerTextVisibility(false);
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
@@ -1454,6 +1501,11 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
         return mIsIconVisible ? mIcon : new ColorDrawable(Color.TRANSPARENT);
     }
 
+    @Override
+    public boolean hasOverlappingRendering() {
+        return false;
+    }
+
     /** Sets the icon visual state to disabled or not. */
     public void setIconDisabled(boolean isDisabled) {
         if (mIcon != null) {
@@ -1471,7 +1523,11 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
         // same as before.
         mDisableRelayout = mIcon != null;
 
-        icon.setBounds(0, 0, mIconSize, mIconSize);
+        final int iconSize = getCustomIconSize();
+
+        if (icon.getBounds().width() != iconSize || icon.getBounds().height() != iconSize) {
+            icon.setBounds(0, 0, iconSize, iconSize);
+        }
 
         updateIcon(icon);
 
@@ -1525,6 +1581,9 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
         CacheLookupFlag expectedFlag = DEFAULT_LOOKUP_FLAG.withThemeIcon(shouldUseTheme());
         if (getTag() instanceof ItemInfoWithIcon info && !mHighResUpdateInProgress
                 && info.getMatchingLookupFlag().isVisuallyLessThan(expectedFlag)) {
+                if (mIcon != null && mIcon.isThemed() && shouldUseTheme()) {
+                    return;
+                }
             if (mIconLoadRequest != null) {
                 mIconLoadRequest.cancel();
             }
@@ -1535,7 +1594,7 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
     }
 
     public int getIconSize() {
-        return mIconSize;
+        return getCustomIconSize();
     }
 
     public boolean isDisplaySearchResult() {
@@ -1572,11 +1631,11 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
 
     @Override
     public void getWorkspaceVisualDragBounds(Rect bounds) {
-        getIconBounds(mIconSize, bounds);
+        getIconBounds(getCustomIconSize(), bounds);
     }
 
     public void getSourceVisualDragBounds(Rect bounds) {
-        getIconBounds(mIconSize, bounds);
+        getIconBounds(getCustomIconSize(), bounds);
     }
 
     @Override
@@ -1634,5 +1693,58 @@ public class BubbleTextView extends TextView implements ItemInfoUpdateReceiver,
      */
     public boolean canShowLongPressPopup() {
         return getTag() instanceof ItemInfo && ShortcutUtil.supportsShortcuts((ItemInfo) getTag());
+    }
+
+    private void resizeIconIfNeeded(int iconSize) {
+        if (mIcon != null && mIcon.getBounds().width() != iconSize) {
+            mIcon.setBounds(0, 0, iconSize, iconSize);
+            updateIcon(mIcon);
+        }
+    }
+
+    private void maybeLoadHighResIcon(ItemInfo info, int targetSize) {
+        if (mHighResEnlargeLoaded) return;
+        if (mIcon == null || mIcon.getIntrinsicWidth() >= targetSize) return;
+        if (info.itemType != LauncherSettings.Favorites.ITEM_TYPE_APPLICATION) return;
+        mHighResEnlargeLoaded = true;
+
+        MODEL_EXECUTOR.execute(() -> {
+            try {
+                LauncherApps la = getContext().getSystemService(LauncherApps.class);
+                if (la == null || info.getIntent() == null) return;
+                LauncherActivityInfo lai = la.resolveActivity(info.getIntent(), info.user);
+                if (lai == null) return;
+
+                LauncherAppState app = LauncherAppState.getInstance(getContext());
+                InvariantDeviceProfile idp = app.getInvariantDeviceProfile();
+                int enlargedDpi = (int) (idp.fillResIconDpi
+                        * ((float) targetSize / idp.iconBitmapSize));
+
+                Drawable fullResIcon =
+                        app.getIconProvider().getIcon(lai.getActivityInfo(), enlargedDpi);
+                if (fullResIcon == null) return;
+
+                ThemeManager themeManager = ThemeManager.INSTANCE.get(getContext());
+                BaseIconFactory factory = new BaseIconFactory(
+                        getContext(), enlargedDpi, targetSize,
+                        Flags.enableLauncherIconShapes(), themeManager.getThemeController());
+                BitmapInfo bitmapInfo = factory.createBadgedIconBitmap(fullResIcon);
+                factory.close();
+
+                post(() -> {
+                    if (getTag() != info) return;
+                    FastBitmapDrawable newIcon =
+                            bitmapInfo.newIcon(getContext(), FLAG_THEMED);
+                    newIcon.setBounds(0, 0, targetSize, targetSize);
+                    updateIcon(newIcon);
+                    mIcon = newIcon;
+                });
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    private int getCustomIconSize() {
+        return mIconSizeDesktop > 0 ? mIconSizeDesktop : mIconSize;
     }
 }

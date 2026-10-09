@@ -249,6 +249,16 @@
     <string name="app_added_to_taskbar">App added to Taskbar</string>
     <!-- Accessibility confirmation for item unpinned from taskbar. [CHAR_LIMIT=NONE] -->
     <string name="app_removed_from_taskbar">App removed from Taskbar</string>
+    <string name="action_enlarge">Enlarge</string>
+    <string name="action_minimize">Minimize</string>
+    <string name="action_customize_folder">Customize</string>
+
+    <string name="folder_style_picker_title">Folder Style</string>
+    <string name="folder_style_quadrant">Quadrant</string>
+    <string name="folder_style_grid">Grid</string>
+    <string name="folder_style_circle">Circle</string>
+    <string name="folder_style_cover">Cover</string>
+    <string name="folder_cover_text_hint">Emoji</string>
     <!-- Label for remove item system shortcut [CHAR_LIMIT=20] -->
     <string name="remove_system_shortcut_label">Remove</string>
     <!-- Context menu action for a file/folder on the home screen which copies the item. [CHAR_LIMIT=20] -->
@@ -436,6 +446,7 @@
     <string name="auto_add_shortcuts_label">Add app icons to home screen</string>
     <!-- Text description of the setting that allows the automatic placement of launcher shortcuts for applications and games installed on the device [CHAR LIMIT=NONE] -->
     <string name="auto_add_shortcuts_description">For new apps</string>
+    <string name="auto_add_shortcuts_forced_ios_summary">Cannot disable while iOS App Drawer style is being used</string>
 
     <!-- Label on an icon that references an uninstalled package, for which we have no information about when it might be installed. [CHAR_LIMIT=15] -->
     <string name="package_state_unknown">Unknown</string>

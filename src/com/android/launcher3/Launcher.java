@@ -90,8 +90,13 @@ import static com.android.launcher3.model.ItemInstallQueue.FLAG_DRAG_AND_DROP;
 import static com.android.launcher3.model.data.ItemInfoWithIcon.FLAG_NOT_PINNABLE;
 import static com.android.launcher3.popup.SystemShortcut.ADD_TO_HOME_SCREEN;
 import static com.android.launcher3.popup.SystemShortcut.APP_INFO;
+import static com.android.launcher3.popup.SystemShortcut.CUSTOM_ICON;
+import static com.android.launcher3.popup.SystemShortcut.CUSTOMIZE_FOLDER;
+import static com.android.launcher3.popup.SystemShortcut.ENLARGE;
 import static com.android.launcher3.popup.SystemShortcut.INSTALL;
+import static com.android.launcher3.popup.SystemShortcut.MINIMIZE;
 import static com.android.launcher3.popup.SystemShortcut.REMOVE;
+import static com.android.launcher3.popup.SystemShortcut.RENAME_APP;
 import static com.android.launcher3.popup.SystemShortcut.UNINSTALL;
 import static com.android.launcher3.popup.SystemShortcut.WIDGETS;
 import static com.android.launcher3.states.RotationHelper.REQUEST_LOCK;
@@ -159,6 +164,7 @@ import com.android.launcher3.DropTarget.DragObject;
 import com.android.launcher3.accessibility.LauncherAccessibilityDelegate;
 import com.android.launcher3.allapps.ActivityAllAppsContainerView;
 import com.android.launcher3.allapps.AllAppsTransitionController;
+import com.android.launcher3.allapps.AppDrawerStyle;
 import com.android.launcher3.allapps.DiscoveryBounce;
 import com.android.launcher3.anim.AnimationSuccessListener;
 import com.android.launcher3.anim.PropertyListBuilder;
@@ -185,7 +191,9 @@ import com.android.launcher3.logging.StartupLatencyLogger;
 import com.android.launcher3.logging.StatsLogManager;
 import com.android.launcher3.model.IModelWriter;
 import com.android.launcher3.model.ItemInstallQueue;
+import com.android.launcher3.model.SerializedItemItem;
 import com.android.launcher3.model.StringCache;
+import com.android.launcher3.model.data.AppInfo;
 import com.android.launcher3.model.data.CollectionInfo;
 import com.android.launcher3.model.data.FolderInfo;
 import com.android.launcher3.model.data.ItemInfo;
@@ -1035,6 +1043,10 @@ public class Launcher extends StatefulActivity<LauncherState>
     @Override
     public void onStateSetStart(LauncherState state) {
         super.onStateSetStart(state);
+        if (ALL_APPS.equals(state) && !canOpenAllApps()) {
+            mStateManager.goToState(NORMAL, false /* animated */);
+            return;
+        }
         addActivityFlags(ACTIVITY_STATE_TRANSITION_ACTIVE);
 
         if (state.hasFlag(FLAG_WORKSPACE_ICONS_BEING_DRAGGED)) {
@@ -1548,6 +1560,9 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     private void showAllAppsWithSelectedTabFromIntent(boolean alreadyOnHome, int tab) {
+        if (isIosStyleDrawer()) {
+            return;
+        }
         AbstractFloatingView.closeAllOpenViews(this);
         getStateManager().goToState(ALL_APPS, alreadyOnHome);
         if (mAppsView.isSearching()) {
@@ -1815,7 +1830,28 @@ public class Launcher extends StatefulActivity<LauncherState>
         mWorkspace.addInScreen(newFolder, folderInfo);
         // Force measure the new folder icon
         CellLayout parent = mWorkspace.getParentCellLayoutForView(newFolder);
-        parent.getShortcutsAndWidgets().measureChild(newFolder);
+        if (parent != null) {
+            parent.getShortcutsAndWidgets().measureChild(newFolder);
+        }
+        return newFolder;
+    }
+
+    public FolderIcon addFolder(CellLayout layout, int container, final int screenId, int cellX,
+            int cellY, int spanX, int spanY) {
+        final FolderInfo folderInfo = new FolderInfo();
+        folderInfo.spanX = spanX;
+        folderInfo.spanY = spanY;
+
+        getModelWriter().addItemToDatabase(folderInfo, container, screenId, cellX, cellY);
+
+        FolderIcon newFolder = (FolderIcon) mItemInflater.inflateItem(folderInfo, layout);
+        mWorkspace.addInScreen(newFolder, folderInfo);
+        CellLayout parent = mWorkspace.getParentCellLayoutForView(newFolder);
+        if (parent != null) {
+            parent.getShortcutsAndWidgets().measureChild(newFolder);
+            newFolder.requestLayout();
+            parent.requestLayout();
+        }
         return newFolder;
     }
 
@@ -2289,9 +2325,16 @@ public class Launcher extends StatefulActivity<LauncherState>
                 op -> mapOverCellLayouts(containerArray, op);
 
         // Order: Preferred item by itself or in folder, then by matching package/user
-        return visibleContainer.getFirstMatch(
+        View matchingView = visibleContainer.getFirstMatch(
                 preferredItem, forFolderMatch(preferredItem),
                 packageAndUserAndApp, forFolderMatch(packageAndUserAndApp));
+        if (matchingView instanceof FolderIcon folderIcon) {
+            folderIcon.clearPreviewItemForAnimation();
+            if (!folderIcon.setPreviewItemForAnimation(preferredItem)) {
+                folderIcon.setPreviewItemForAnimation(packageAndUserAndApp);
+            }
+        }
+        return matchingView;
     }
 
     private ValueAnimator createNewAppBounceAnimation(View v, int i) {
@@ -2491,7 +2534,39 @@ public class Launcher extends StatefulActivity<LauncherState>
     }
 
     public TouchController[] createTouchControllers() {
+        if (isIosStyleDrawer()) {
+            return new TouchController[] {getDragController()};
+        }
         return new TouchController[] {getDragController(), new AllAppsSwipeController(this)};
+    }
+
+    public boolean canOpenAllApps() {
+        return !isIosStyleDrawer();
+    }
+
+    private boolean isIosStyleDrawer() {
+        return AppDrawerStyle.isIos(AppDrawerStyle.get(this));
+    }
+
+    public void syncWorkspaceForIosStyle() {
+        if (!isIosStyleDrawer()) {
+            LauncherPrefs.get(this).put(LauncherPrefs.APP_DRAWER_STYLE_IOS_MIGRATED, false);
+            return;
+        }
+        if (LauncherPrefs.APP_DRAWER_STYLE_IOS_MIGRATED.get(this) || mAppsView == null) {
+            return;
+        }
+
+        AppInfo[] apps = mAppsView.getAppsStore().getApps();
+        if (apps.length == 0) {
+            return;
+        }
+
+        ItemInstallQueue installQueue = ItemInstallQueue.INSTANCE.get(this);
+        for (AppInfo app : apps) {
+            installQueue.queueItem(new SerializedItemItem(app.getTargetPackage(), app.user));
+        }
+        LauncherPrefs.get(this).put(LauncherPrefs.APP_DRAWER_STYLE_IOS_MIGRATED, true);
     }
 
     public void onDragLayerHierarchyChanged() {
@@ -2852,18 +2927,20 @@ public class Launcher extends StatefulActivity<LauncherState>
     public Stream<SystemShortcut.Factory> getSupportedShortcuts(ItemInfo itemInfo) {
         int container = itemInfo.container;
         if (container == CONTAINER_DESKTOP || container == CONTAINER_HOTSEAT) {
-            return Stream.of(APP_INFO, WIDGETS, INSTALL, REMOVE, UNINSTALL);
+            return Stream.of(APP_INFO, RENAME_APP, CUSTOM_ICON, WIDGETS, INSTALL, REMOVE,
+                    UNINSTALL);
         } else if (container == CONTAINER_ALL_APPS || container == CONTAINER_ALL_APPS_PREDICTION) {
             // TODO(b/444744861): Update private space apps to have its own container.
             boolean isPinnable = itemInfo instanceof ItemInfoWithIcon info
                     && (info.runtimeStatusFlags & FLAG_NOT_PINNABLE) == 0;
             if (isPinnable) {
-                return Stream.of(APP_INFO, WIDGETS, INSTALL, ADD_TO_HOME_SCREEN, UNINSTALL);
+                return Stream.of(APP_INFO, RENAME_APP, CUSTOM_ICON, WIDGETS, INSTALL,
+                        ADD_TO_HOME_SCREEN, UNINSTALL);
             } else {
-                return Stream.of(APP_INFO, WIDGETS, INSTALL, UNINSTALL);
+                return Stream.of(APP_INFO, RENAME_APP, CUSTOM_ICON, WIDGETS, INSTALL, UNINSTALL);
             }
         }
-        return Stream.of(APP_INFO, WIDGETS, INSTALL, UNINSTALL);
+        return Stream.of(APP_INFO, RENAME_APP, CUSTOM_ICON, WIDGETS, INSTALL, UNINSTALL);
     }
 
     /**

@@ -25,19 +25,20 @@ import static com.android.launcher3.util.SplitConfigurationOptions.STAGE_POSITIO
 
 import android.app.ActivityOptions;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.RemoteException;
-import android.provider.Settings;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManagerGlobal;
 import android.window.DesktopExperienceFlags;
 import android.window.SplashScreen;
+import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
@@ -410,6 +411,17 @@ public interface TaskShortcutFactory {
         }
     };
 
+    TaskShortcutFactory LOCK_APP = new TaskShortcutFactory() {
+        @Override
+        public List<SystemShortcut> getShortcuts(RecentsViewContainer container,
+                TaskContainer taskContainer) {
+            if (taskContainer.getTaskView().getLockablePackages().isEmpty()) {
+                return null;
+            }
+            return Collections.singletonList(new LockAppSystemShortcut(container, taskContainer));
+        }
+    };
+
     TaskShortcutFactory FREE_FORM = new TaskShortcutFactory() {
         @Override
         public List<SystemShortcut> getShortcuts(RecentsViewContainer container,
@@ -545,4 +557,26 @@ public interface TaskShortcutFactory {
             return createSingletonShortcutList(modalStateSystemShortcut);
         }
     };
+
+    class LockAppSystemShortcut extends SystemShortcut<RecentsViewContainer> {
+        private final TaskView mTaskView;
+
+        public LockAppSystemShortcut(RecentsViewContainer target, TaskContainer taskContainer) {
+            super(R.drawable.recents_locked, R.string.action_lock,
+                    target, taskContainer.getItemInfo(), taskContainer.getTaskView());
+            mTaskView = taskContainer.getTaskView();
+        }
+
+        @Override
+        public void onClick(View view) {
+            dismissTaskMenuView();
+            Boolean isNowLocked = mTaskView.toggleLockState();
+            if (isNowLocked == null) {
+                return;
+            }
+            Context context = mTaskView.getContext();
+            Toast.makeText(context, isNowLocked ? R.string.lock_app : R.string.unlock_app,
+                    Toast.LENGTH_SHORT).show();
+        }
+    }
 }

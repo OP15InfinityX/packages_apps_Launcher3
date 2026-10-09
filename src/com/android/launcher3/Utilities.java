@@ -285,6 +285,9 @@ public static boolean useAlternativeQuickspaceUI(Context context) {
      * Inverse of {@link #getDescendantCoordRelativeToAncestor(View, View, float[], boolean)}.
      */
     public static void mapCoordInSelfToDescendant(View descendant, View root, float[] coord) {
+        if (descendant == null || root == null) {
+            return;
+        }
         sMatrix.reset();
         //TODO(b/307488755) when implemented this check should be removed
         if (!Objects.equals(descendant.getWindowId(), root.getWindowId())) {

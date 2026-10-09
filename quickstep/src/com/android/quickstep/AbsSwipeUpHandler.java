@@ -75,6 +75,7 @@ import android.animation.AnimatorSet;
 import android.animation.ValueAnimator;
 import android.app.ActivityManager;
 import android.app.TaskInfo;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Resources;
@@ -115,6 +116,7 @@ import com.android.launcher3.AbstractFloatingView;
 import com.android.launcher3.DeviceProfile;
 import com.android.launcher3.Flags;
 import com.android.launcher3.LifecycleTracker;
+import com.android.launcher3.LauncherPrefs;
 import com.android.launcher3.QuickstepTransitionManager;
 import com.android.launcher3.R;
 import com.android.launcher3.Utilities;
@@ -136,6 +138,7 @@ import com.android.launcher3.uioverrides.QuickstepLauncher;
 import com.android.launcher3.util.MSDLPlayerWrapper;
 import com.android.launcher3.util.NavigationMode;
 import com.android.launcher3.util.SafeCloseable;
+import com.android.launcher3.util.SplitConfigurationOptions.SplitPositionOption;
 import com.android.launcher3.util.ThreadedAnimator;
 import com.android.launcher3.util.TraceHelper;
 import com.android.launcher3.util.VibratorWrapper;
@@ -211,6 +214,9 @@ public abstract class AbsSwipeUpHandler<
 
     // Fraction of the scroll and transform animation in which the current task fades out
     private static final float KQS_TASK_FADE_ANIMATION_FRACTION = 0.4f;
+    private static final String LMO_FREEFORM_INTENT = "com.libremobileos.freeform.START_FREEFORM";
+    private static final String LMO_FREEFORM_PACKAGE = "com.libremobileos.freeform";
+    private static final String OVERVIEW_GESTURE_ACTION_SPLIT_SCREEN = "split_screen";
 
     protected final RecentsAnimationDeviceState mDeviceState;
     protected final BaseContainerInterface<STATE, RECENTS_CONTAINER> mContainerInterface;
@@ -727,6 +733,7 @@ public abstract class AbsSwipeUpHandler<
     }
 
     private void onLauncherPresentAndGestureStarted() {
+        resetOverviewGestureState();
         // Re-setup the recents UI when gesture starts, as the state could have been changed during
         // that time by a previous window transition.
         setupRecentsViewUi();
@@ -1014,6 +1021,14 @@ public abstract class AbsSwipeUpHandler<
     /**
      * Called when the value of {@link #mCurrentShift} changes
      */
+    @Override
+    public void updateDisplacement(float displacement) {
+        if (mHasSplitScreenGestureStarted) {
+            return;
+        }
+        super.updateDisplacement(displacement);
+    }
+
     @UiThread
     @Override
     public void onCurrentShiftUpdated() {
@@ -1070,6 +1085,7 @@ public abstract class AbsSwipeUpHandler<
                         UI_STATE_FULLSCREEN_TASK, centermostTaskFlags);
             }
         }
+        updateOverviewGestureProgress(windowProgress);
     }
 
     @Override
@@ -1302,6 +1318,12 @@ public abstract class AbsSwipeUpHandler<
      */
     @VisibleForTesting
     protected void onCalculateEndTarget() {
+        GestureEndTarget overviewGestureEndTarget = maybeStartOverviewGestureAction();
+        if (overviewGestureEndTarget != null) {
+            mGestureState.setEndTarget(overviewGestureEndTarget);
+            mAnimationFactory.setEndTarget(overviewGestureEndTarget);
+        }
+
         final GestureEndTarget endTarget = mGestureState.getEndTarget();
 
         switch (endTarget) {
@@ -1395,6 +1417,14 @@ public abstract class AbsSwipeUpHandler<
                 Math.toDegrees(Math.atan2(-velocityPxPerMs.y, velocityPxPerMs.x)));
         ActiveGestureLog.CompoundString reasonString =
                 ActiveGestureLog.CompoundString.newEmptyString();
+
+        if (mHasSplitScreenGestureStarted) {
+            ActiveGestureProtoLogProxy.logCalculateEndTargetResultAndReason(
+                    RECENTS.toString(),
+                    new ActiveGestureLog.CompoundString(
+                            "mHasSplitScreenGestureStarted = true"));
+            return RECENTS;
+        }
 
         if (mGestureState.isHandlingAtomicEvent()) {
             GestureEndTarget endTarget = mGestureState.getAtomicEndTarget();
@@ -2431,6 +2461,7 @@ public abstract class AbsSwipeUpHandler<
         if (mContainer != null) {
             mContainer.removeEventCallback(EVENT_DESTROYED, mLauncherOnDestroyCallback);
         }
+        resetOverviewGestureState();
     }
 
     /**
@@ -2441,6 +2472,7 @@ public abstract class AbsSwipeUpHandler<
         ActiveGestureProtoLogProxy.logAbsSwipeUpHandlerCancelCurrentAnimation();
         mAnimationCanceled = true;
         mCurrentShift.cancelAnimation();
+        resetOverviewGestureState();
 
         // Cleanup when switching handlers
         mInputConsumerProxy.unregisterOnTouchDownCallback();
@@ -2693,6 +2725,249 @@ public abstract class AbsSwipeUpHandler<
                 || app.windowConfiguration.getActivityType() == ACTIVITY_TYPE_HOME;
     }
 
+    private boolean isOverviewGestureEnabled() {
+        return LauncherPrefs.FREEFORM_GESTURE.get(mContext);
+    }
+
+    private boolean isSplitScreenOverviewGestureAction() {
+        return OVERVIEW_GESTURE_ACTION_SPLIT_SCREEN.equals(
+                LauncherPrefs.OVERVIEW_GESTURE_ACTION.get(mContext));
+    }
+
+    private float getOverviewGestureThreshold() {
+        int progress = LauncherPrefs.FREEFORM_GESTURE_PROGRESS.get(mContext);
+        return Utilities.boundToRange(progress / 10f, 1f, 5f);
+    }
+
+    private boolean mHasSplitScreenGestureStarted = false;
+    private boolean mIsFreeformVibrating = false;
+
+    private final Runnable mFreeformVibrateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (mIsFreeformVibrating) {
+                VibratorWrapper.INSTANCE.get(mContext).vibrate(
+                        android.os.VibrationEffect.createPredefined(
+                                android.os.VibrationEffect.EFFECT_TICK));
+                MAIN_EXECUTOR.getHandler().postDelayed(this, 50);
+            }
+        }
+    };
+
+    private void startFreeformVibration() {
+        if (!mIsFreeformVibrating) {
+            mIsFreeformVibrating = true;
+            Toast.makeText(
+                    mContext,
+                    R.string.freeform_gesture_threshold_reached,
+                    Toast.LENGTH_SHORT).show();
+            mFreeformVibrateRunnable.run();
+            animateFreeformScale(true);
+        }
+    }
+
+    private void resetOverviewGestureState() {
+        stopFreeformFeedback();
+        mHasSplitScreenGestureStarted = false;
+    }
+
+    private void stopFreeformFeedback() {
+        if (mIsFreeformVibrating) {
+            mIsFreeformVibrating = false;
+            MAIN_EXECUTOR.getHandler().removeCallbacks(mFreeformVibrateRunnable);
+            animateFreeformScale(false);
+        }
+    }
+
+    private ValueAnimator mFreeformScaleAnimator;
+    private final Matrix mFreeformScaleMatrix = new Matrix();
+    private float mCurrentFreeformScale = 1f;
+
+    private void animateFreeformScale(boolean isScalingDown) {
+        if (mFreeformScaleAnimator != null) {
+            mFreeformScaleAnimator.cancel();
+        }
+        float targetScale = isScalingDown ? 0.95f : 1f;
+        mFreeformScaleAnimator = ValueAnimator.ofFloat(mCurrentFreeformScale, targetScale);
+        mFreeformScaleAnimator.setDuration(150);
+        mFreeformScaleAnimator.setInterpolator(com.android.app.animation.Interpolators.DECELERATE);
+        mFreeformScaleAnimator.addUpdateListener(animation -> {
+            mCurrentFreeformScale = (float) animation.getAnimatedValue();
+            float pivotX = mDp.getDeviceProperties().getWidthPx() / 2f;
+            float pivotY = mDp.getDeviceProperties().getHeightPx() / 2f;
+            mFreeformScaleMatrix.setScale(mCurrentFreeformScale, mCurrentFreeformScale, pivotX, pivotY);
+
+            float radiusProgress = (1f - mCurrentFreeformScale) / 0.05f;
+            float maxRadius = com.android.quickstep.util.TaskCornerRadius.get(mContext);
+            float radius = radiusProgress * maxRadius;
+
+            if (mRemoteTargetHandles != null) {
+                for (RemoteTargetHandle handle : mRemoteTargetHandles) {
+                    TaskViewSimulator tvs = handle.getTaskViewSimulator();
+                    TransformParams params = handle.getTransformParams();
+                    tvs.setTaskRectTransform(mCurrentFreeformScale == 1f ? null : mFreeformScaleMatrix);
+                    params.setCornerRadius(radius <= 0f ? -1f : radius);
+                    tvs.apply(params);
+                }
+            }
+        });
+        mFreeformScaleAnimator.start();
+    }
+
+    private void updateOverviewGestureProgress(float windowProgress) {
+        if (!isOverviewGestureEnabled()) {
+            return;
+        }
+
+        if (isSplitScreenOverviewGestureAction()) {
+            updateSplitScreenGestureProgress(windowProgress);
+            return;
+        }
+
+        if (windowProgress >= getOverviewGestureThreshold()) {
+            startFreeformVibration();
+        } else {
+            stopFreeformFeedback();
+        }
+    }
+
+    private void updateSplitScreenGestureProgress(float windowProgress) {
+        if (windowProgress < getOverviewGestureThreshold() || mHasSplitScreenGestureStarted) {
+            return;
+        }
+
+        TaskInfo runningTask = getRunningTaskInfo();
+        if (runningTask == null || runningTask.taskId == -1) {
+            return;
+        }
+
+        TaskView taskView = getGestureSplitTaskView(runningTask.taskId);
+        if (taskView == null) {
+            return;
+        }
+
+        mHasSplitScreenGestureStarted = true;
+        VibratorWrapper.INSTANCE.get(mContext).vibrate(
+                android.os.VibrationEffect.createPredefined(android.os.VibrationEffect.EFFECT_TICK));
+        finishRecentsTouchForSplit(taskView);
+        postStartSplitScreenFromGesture(runningTask.taskId);
+    }
+
+    @Nullable
+    private TaskView getGestureSplitTaskView(int taskId) {
+        if (mRecentsView == null) {
+            return null;
+        }
+        TaskView taskView = mRecentsView.getTaskViewByTaskId(taskId);
+        if (taskView != null) {
+            return taskView;
+        }
+        return mRecentsView.getCurrentPageTaskView();
+    }
+
+    private void finishRecentsTouchForSplit(TaskView taskView) {
+        if (mRecentsView == null) {
+            return;
+        }
+        mRecentsView.prepareForGestureSplitSelect(taskView);
+    }
+
+    private void postStartSplitScreenFromGesture(int taskId) {
+        runOnRecentsAnimationStart(() -> {
+            if (mRecentsView == null) {
+                return;
+            }
+            mRecentsView.runOnPageScrollsInitialized(() ->
+                    mRecentsView.postOnAnimation(() -> mRecentsView.postOnAnimation(() -> {
+                        if (mHasSplitScreenGestureStarted) {
+                            startSplitScreenFromGesture(taskId);
+                        }
+                    })));
+        });
+    }
+
+    private GestureEndTarget maybeStartOverviewGestureAction() {
+        if (!isOverviewGestureEnabled()) {
+            return null;
+        }
+        if (isSplitScreenOverviewGestureAction()) {
+            return mHasSplitScreenGestureStarted ? RECENTS : null;
+        }
+        if (mCurrentShift.value < getOverviewGestureThreshold()) {
+            return null;
+        }
+
+        TaskInfo runningTask = getRunningTaskInfo();
+        if (runningTask == null || runningTask.taskId == -1) {
+            return null;
+        }
+        startFreeformByLmoBroadcast(runningTask);
+        return HOME;
+    }
+
+    private boolean startSplitScreenFromGesture(int taskId) {
+        if (mRecentsView == null || mContainer == null) {
+            return false;
+        }
+        TaskView taskView = mRecentsView.getTaskViewByTaskId(taskId);
+        if (taskView == null) {
+            taskView = mRecentsView.getCurrentPageTaskView();
+        }
+        if (taskView == null) {
+            return false;
+        }
+
+        TaskContainer taskContainer = taskView.getTaskContainerById(taskId);
+        if (taskContainer == null) {
+            taskContainer = taskView.getFirstTaskContainer();
+        }
+        if (taskContainer == null) {
+            return false;
+        }
+
+        List<SplitPositionOption> splitOptions = mRecentsView.getPagedOrientationHandler()
+                .getSplitPositionOptions(mContainer.getDeviceProfile());
+        if (splitOptions.isEmpty()) {
+            return false;
+        }
+
+        mRecentsView.initiateSplitSelect(
+                taskContainer,
+                splitOptions.get(0).stagePosition,
+                StatsLogManager.LauncherEvent.LAUNCHER_OVERVIEW_ACTIONS_SPLIT);
+        return true;
+    }
+
+    @Nullable
+    private TaskInfo getRunningTaskInfo() {
+        TopTaskTracker.CachedTaskInfo runningTask = mGestureState.getRunningTask();
+        return runningTask == null ? null : runningTask.getLegacyBaseTask();
+    }
+
+    private void startFreeformByLmoBroadcast(@NonNull TaskInfo taskInfo) {
+        Intent intent = new Intent(LMO_FREEFORM_INTENT).setPackage(LMO_FREEFORM_PACKAGE);
+
+        ComponentName topActivity = taskInfo.topActivity != null
+                ? taskInfo.topActivity
+                : taskInfo.baseActivity;
+        String packageName = topActivity != null
+                ? topActivity.getPackageName()
+                : null;
+        String activityName = topActivity != null
+                ? topActivity.getClassName()
+                : null;
+
+        if (packageName == null || activityName == null) {
+            return;
+        }
+
+        intent.putExtra("packageName", packageName);
+        intent.putExtra("activityName", activityName);
+        intent.putExtra("userId", taskInfo.userId);
+        intent.putExtra("taskId", taskInfo.taskId);
+        mContext.sendBroadcast(intent);
+    }
+
     protected void performHapticFeedback() {
         if (msdlFeedback()) {
             mMSDLPlayerWrapper.playToken(MSDLToken.SWIPE_THRESHOLD_INDICATOR);
@@ -2706,7 +2981,16 @@ public abstract class AbsSwipeUpHandler<
      * ensure it clears the ref to returned consumer once gesture is ended.
      */
     public Consumer<MotionEvent> getRecentsViewDispatcher(float navbarRotation) {
-        return mRecentsView != null ? mRecentsView.getEventDispatcher(navbarRotation) : null;
+        if (mRecentsView == null) {
+            return null;
+        }
+        Consumer<MotionEvent> recentsDispatcher = mRecentsView.getEventDispatcher(navbarRotation);
+        return ev -> {
+            if (mHasSplitScreenGestureStarted) {
+                return;
+            }
+            recentsDispatcher.accept(ev);
+        };
     }
 
     public void setGestureEndCallback(Runnable gestureEndCallback) {
@@ -2760,9 +3044,11 @@ public abstract class AbsSwipeUpHandler<
     }
 
     private void onRecentsViewScroll() {
-        if (moveWindowWithRecentsScroll()) {
-            onCurrentShiftUpdated();
+        if (!moveWindowWithRecentsScroll()) return;
+        if (mRecentsView != null && mRecentsView.isOverlapStyleActive()) {
+            return;
         }
+        onCurrentShiftUpdated();
     }
 
     protected void startNewTask(@Nullable TaskView taskToLaunch, Consumer<Boolean> resultCallback) {

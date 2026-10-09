@@ -15,9 +15,14 @@
  */
 package com.android.launcher3
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.ShortcutInfo
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
 import android.os.UserHandle
+import android.provider.Settings
 import android.util.Log
 import androidx.annotation.GuardedBy
 import androidx.annotation.VisibleForTesting
@@ -42,7 +47,9 @@ import com.android.launcher3.model.ModelTaskController
 import com.android.launcher3.model.ModelWriterFactory
 import com.android.launcher3.model.data.WorkspaceItemInfo
 import com.android.launcher3.model.tasks.CacheDataUpdatedTask
+import com.android.launcher3.model.tasks.CustomAppNameChangedTask
 import com.android.launcher3.pm.UserCache
+import com.android.launcher3.util.CustomAppNameStore
 import com.android.launcher3.util.DaggerSingletonTracker
 import com.android.launcher3.util.Executors.MODEL_EXECUTOR
 import com.android.launcher3.util.PackageUserKey
@@ -115,10 +122,29 @@ constructor(
     init {
         if (!dbFileName.isNullOrEmpty()) {
             initializer.initialize(this)
+            lifecycle.addCloseable(CustomAppNameStore.registerUninstallCleanup(context))
+            registerSandboxConfigObserver(lifecycle)
         }
         lifecycle.addCloseable { destroy() }
         modelDelegate.init(this, mBgAllAppsList, mBgDataModel)
         lifecycle.addCloseable(dumpManager.register(this))
+    }
+
+    private fun registerSandboxConfigObserver(lifecycle: DaggerSingletonTracker) {
+        val sandboxObserver =
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    reloadIfActive("sandboxConfigChanged")
+                }
+            }
+        context.contentResolver.registerContentObserver(
+            Settings.Secure.getUriFor(SANDBOX_CONFIG),
+            false,
+            sandboxObserver,
+        )
+        lifecycle.addCloseable {
+            context.contentResolver.unregisterContentObserver(sandboxObserver)
+        }
     }
 
     fun newModelCallbacks() = ModelLauncherCallbacks(this::enqueueModelUpdateTask)
@@ -326,6 +352,12 @@ constructor(
         }
     }
 
+    /** Called when a user-defined app display name has changed. */
+    fun onCustomAppNameChanged(component: ComponentName, user: UserHandle) {
+        enqueueModelUpdateTask(CustomAppNameChangedTask(component, user))
+        validateModelDataOnResume()
+    }
+
     fun enqueueModelUpdateTask(task: ModelUpdateTask) {
         if (mModelDestroyed) {
             return
@@ -389,6 +421,8 @@ constructor(
 
     companion object {
         const val TAG = "Launcher.Model"
+
+        private const val SANDBOX_CONFIG = "sandbox_config"
 
         @JvmStatic
         fun useModelRepositoryBinding() =

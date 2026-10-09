@@ -26,10 +26,14 @@ import static com.android.launcher3.views.FloatingIconViewCompanion.setPropertie
 
 import android.animation.Animator;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
+import android.graphics.HardwareRenderer;
+import android.graphics.RenderNode;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.drawable.AdaptiveIconDrawable;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.os.CancellationSignal;
 import android.util.AttributeSet;
@@ -242,6 +246,28 @@ public class FloatingIconView extends FrameLayout implements
         layout(left, lp.topMargin, left + lp.width, lp.topMargin + lp.height);
     }
 
+    @Nullable
+    private static ItemInfo getAnimationSourceItem(View originalView) {
+        if (originalView instanceof FolderIcon folderIcon) {
+            ItemInfo previewItem = folderIcon.getPreviewItemForAnimation();
+            if (previewItem != null) {
+                return previewItem;
+            }
+        }
+        return originalView.getTag() instanceof ItemInfo ? (ItemInfo) originalView.getTag() : null;
+    }
+
+    @Nullable
+    private static Supplier<Drawable> newDrawableSupplier(@Nullable Drawable drawable) {
+        if (drawable == null) {
+            return null;
+        }
+        if (drawable.getConstantState() != null) {
+            return () -> drawable.getConstantState().newDrawable();
+        }
+        return () -> drawable;
+    }
+
     private static void getLocationBoundsForView(Launcher launcher, View v, boolean isOpening,
             RectF outRect) {
         getLocationBoundsForView(launcher, v, isOpening, outRect, new Rect());
@@ -271,8 +297,10 @@ public class FloatingIconView extends FrameLayout implements
 
         if (v instanceof BubbleTextView) {
             ((BubbleTextView) v).getIconBounds(outViewBounds);
-        } else if (v instanceof FolderIcon) {
-            ((FolderIcon) v).getPreviewBounds(outViewBounds);
+        } else if (v instanceof FolderIcon folderIcon) {
+            if (!folderIcon.getPreviewItemBounds(outViewBounds)) {
+                folderIcon.getPreviewBounds(outViewBounds);
+            }
         } else {
             outViewBounds.set(0, 0, v.getWidth(), v.getHeight());
         }
@@ -325,7 +353,8 @@ public class FloatingIconView extends FrameLayout implements
                         && fbd.isCreatedForTheme();
                 fullIcon = l.getActivityComponent().getIconLoader().getFullDrawable(
                         info, width, height, shouldThemeIcon);
-            } else if (!(originalView instanceof BubbleTextView)) {
+            } else if (!(originalView instanceof BubbleTextView)
+                    && !(originalView instanceof FolderIcon)) {
                 fullIcon = l.getActivityComponent().getIconLoader().getFullDrawable(
                         info, width, height, true /* shouldThemeIcon */);
             }
@@ -570,18 +599,43 @@ public class FloatingIconView extends FrameLayout implements
         RectF position = new RectF();
         getLocationBoundsForView(l, v, isOpening, position);
 
-        final FastBitmapDrawable btvIcon;
+        ItemInfo iconInfo = info;
+        final Drawable btvIcon;
         final Supplier<Drawable> btvDrawableSupplier;
         if (v instanceof BubbleTextView btv) {
             if (info instanceof ItemInfoWithIcon iiwi && iiwi.shouldShowPendingIcon()) {
-                btvIcon = newPendingIcon(iiwi, l, btv.getIconCreationFlagsForInfo(iiwi));
-                btvDrawableSupplier = () -> btvIcon;
+                FastBitmapDrawable fastBtvIcon = newPendingIcon(iiwi, l, btv.getIconCreationFlagsForInfo(iiwi));
+                btvIcon = fastBtvIcon;
+                btvDrawableSupplier = () -> fastBtvIcon;
             } else {
-                btvIcon = btv.getIcon();
+                FastBitmapDrawable fastBtvIcon = btv.getIcon();
+                btvIcon = fastBtvIcon;
                 // Clone when needed
-                btvDrawableSupplier = () -> (btvIcon != null && btvIcon.getConstantState() != null)
-                        ? btvIcon.getConstantState().newDrawable()
+                btvDrawableSupplier = () -> (fastBtvIcon != null && fastBtvIcon.getConstantState() != null)
+                        ? fastBtvIcon.getConstantState().newDrawable()
                         : null;
+            }
+        } else if (v instanceof FolderIcon folderIcon) {
+            ItemInfo previewItem = folderIcon.getPreviewItemForAnimation();
+            if (previewItem != null) {
+                iconInfo = previewItem;
+                btvIcon = folderIcon.getPreviewItemManager().createDrawableForItem(previewItem);
+                btvDrawableSupplier = newDrawableSupplier(btvIcon);
+            } else {
+                Rect r = new Rect();
+                folderIcon.getPreviewBounds(r);
+
+                RenderNode renderNode = new RenderNode("FolderIconSnapshot");
+                renderNode.setPosition(0, 0, r.width(), r.height());
+                Canvas canvas = renderNode.beginRecording();
+                canvas.translate(-r.left, -r.top);
+                folderIcon.draw(canvas);
+                renderNode.endRecording();
+                Bitmap b = HardwareRenderer.createHardwareBitmap(
+                        renderNode, r.width(), r.height());
+
+                btvIcon = new BitmapDrawable(l.getResources(), b);
+                btvDrawableSupplier = newDrawableSupplier(btvIcon);
             }
         } else {
             btvIcon = null;
@@ -590,12 +644,14 @@ public class FloatingIconView extends FrameLayout implements
 
         boolean isThemed = false;
         boolean usingCustomShape = false;
-        if (btvIcon != null) {
-            isThemed = btvIcon.isThemed();
-            usingCustomShape = (btvIcon.creationFlags & FLAG_CUSTOM_SHAPE) != 0;
+        if (btvIcon instanceof FastBitmapDrawable) {
+            FastBitmapDrawable fastBtvIcon = (FastBitmapDrawable) btvIcon;
+            isThemed = fastBtvIcon.isThemed();
+            usingCustomShape = (fastBtvIcon.creationFlags & FLAG_CUSTOM_SHAPE) != 0;
         }
 
-        IconLoadResult result = new IconLoadResult(info, isThemed, usingCustomShape);
+        final ItemInfo iconInfoFinal = iconInfo;
+        IconLoadResult result = new IconLoadResult(iconInfoFinal, isThemed, usingCustomShape);
         result.btvDrawable = btvDrawableSupplier;
 
         final long fetchIconId = sFetchIconId++;
@@ -603,7 +659,7 @@ public class FloatingIconView extends FrameLayout implements
             if (fetchIconId < sRecycledFetchIconId) {
                 return;
             }
-            getIconResult(l, v, info, position, btvIcon, result);
+            getIconResult(l, v, iconInfoFinal, position, btvIcon, result);
         });
 
         sIconLoadResult = result;
@@ -645,13 +701,13 @@ public class FloatingIconView extends FrameLayout implements
         view.mPositionOut = positionOut;
 
         // Get the drawable on the background thread
-        boolean shouldLoadIcon = originalView.getTag() instanceof ItemInfo && hideOriginal;
+        ItemInfo sourceItem = getAnimationSourceItem(originalView);
+        boolean shouldLoadIcon = sourceItem != null && hideOriginal;
         if (shouldLoadIcon) {
-            if (sIconLoadResult != null && sIconLoadResult.itemInfo == originalView.getTag()) {
+            if (sIconLoadResult != null && sIconLoadResult.itemInfo == sourceItem) {
                 view.mIconLoadResult = sIconLoadResult;
             } else {
-                view.mIconLoadResult = fetchIcon(launcher, originalView,
-                        (ItemInfo) originalView.getTag(), isOpening);
+                view.mIconLoadResult = fetchIcon(launcher, originalView, sourceItem, isOpening);
             }
             view.setOriginalDrawableBackground(view.mIconLoadResult.btvDrawable);
         }
@@ -737,6 +793,9 @@ public class FloatingIconView extends FrameLayout implements
         mIsOpening = false;
         mPositionOut = null;
         mListenerView.setListener(null);
+        if (mOriginalIcon instanceof FolderIcon folderIcon) {
+            folderIcon.clearPreviewItemForAnimation();
+        }
         mOriginalIcon = null;
         mOnTargetChangeRunnable = null;
         mBadge = null;

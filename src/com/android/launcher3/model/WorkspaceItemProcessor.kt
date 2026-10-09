@@ -491,10 +491,12 @@ class WorkspaceItemProcessor(
         c.applyCommonProperties(collection)
         // Do not trim the folder label, as is was set by the user.
         collection.title = c.title
-        collection.spanX = 1
-        collection.spanY = 1
+        collection.spanX = c.spanX
+        collection.spanY = c.spanY
         if (collection is FolderInfo) {
             collection.options = c.options
+            collection.folderStyle = c.folderStyle
+            collection.coverText = c.coverText
         } else {
             // An app pair may be inside another folder, so it needs to preserve rank information.
             collection.rank = c.rank

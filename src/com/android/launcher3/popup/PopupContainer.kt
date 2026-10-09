@@ -145,7 +145,7 @@ open class PopupContainer<T : ActivityContext>(
             )
         } else {
             systemShortcutContainer = inflateAndAdd(R.layout.system_shortcut_rows_container, this)
-            if (showCarousel) {
+            if (showCarousel && systemShortcuts.size > 2) {
                 inflateAndAdd<ViewGroup>(R.layout.wallpaper_options_popup, systemShortcutContainer)
             }
             systemShortcuts.forEach { systemShortcut ->

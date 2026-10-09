@@ -236,6 +236,10 @@ public class AllAppsTransitionController
         }
 
         AllAppsRecyclerView rv = mLauncher.getAppsView().getActiveRecyclerView();
+        if (rv == null) {
+            // Paged drawer may be between page rebuilds.
+            return;
+        }
 
         // Disable view clipping from all apps' RecyclerView up to all apps view during scale
         // animation, and vice versa. The goal is to display extra roll(s) app icons (rendered in
@@ -244,8 +248,9 @@ public class AllAppsTransitionController
         if (hasScaleEffect != mHasScaleEffect) {
             mHasScaleEffect = hasScaleEffect;
             if (mHasScaleEffect) {
-                modifyAttributesOnViewTree(rv, mLauncher.getAppsView(),
-                        CLIP_CHILDREN_FALSE_MODIFIER);
+                // Do not disable clipping if drawer opening, otherwise we tank frame rate
+                if (scaleProgress < 0.95f)
+                    modifyAttributesOnViewTree(rv, mLauncher.getAppsView(), CLIP_CHILDREN_FALSE_MODIFIER);
             } else {
                 restoreAttributesOnViewTree(rv, mLauncher.getAppsView(),
                         CLIP_CHILDREN_FALSE_MODIFIER);
@@ -349,10 +354,6 @@ public class AllAppsTransitionController
 
         boolean shouldProtectHeader = !config.hasAnimationFlag(StateAnimationConfig.SKIP_SCRIM)
                 && (ALL_APPS == state || mLauncher.getStateManager().getState() == ALL_APPS);
-        Log.d(TAG, "shouldProtectHeader: " + shouldProtectHeader
-                + " skipScrim: " + config.hasAnimationFlag(StateAnimationConfig.SKIP_SCRIM)
-                + " state: " + state
-                + " stateManager.getState(): " + mLauncher.getStateManager().getState());
         mScrimView.setDrawingController(shouldProtectHeader ? mAppsView : null);
     }
 
@@ -383,6 +384,9 @@ public class AllAppsTransitionController
      * Updates the total scroll range but does not update the UI.
      */
     public void setShiftRange(float shiftRange) {
-        mShiftRange = shiftRange;
+        // Fullscreen drawer styles slide in from the very bottom of the screen.
+        mShiftRange = AppDrawerStyle.isFullscreen(mLauncher)
+                ? mLauncher.getDeviceProfile().getDeviceProperties().getHeightPx()
+                : shiftRange;
     }
 }

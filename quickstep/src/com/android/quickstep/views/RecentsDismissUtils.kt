@@ -331,12 +331,20 @@ constructor(
         }
     }
 
-    /** Dismisses all */
+    /** Dismisses all tasks, except the ones locked in Recents. */
     fun dismissAllTasks() {
+        val taskViews = recentsView.mUtils.taskViews.toList()
+        val hasLockedTasks = taskViews.any { it.isLocked }
+        val unlockedTaskIds =
+            if (hasLockedTasks) {
+                taskViews.filterNot { it.isLocked }.flatMap { it.taskIds.asList() }
+            } else {
+                emptyList()
+            }
         val allDismissSprings =
-            recentsView.mUtils.taskViews
+            taskViews
                 .reversed()
-                .filter { taskView -> recentsView.isTaskViewVisible(taskView) }
+                .filter { taskView -> recentsView.isTaskViewVisible(taskView) && !taskView.isLocked }
                 .mapNotNull { createDismissedTaskViewSpringAnimation(it) }
         SpringSet(SpringAnimation(FloatValueHolder()).setSpring(SpringForce(1f)))
             .playTogether(allDismissSprings)
@@ -350,8 +358,19 @@ constructor(
 
                     // Remove all the task views now
                     finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false) {
-                        uiHelperExecutor.execute { activityManagerWrapper.removeAllRecentTasks() }
+                        uiHelperExecutor.execute {
+                            if (hasLockedTasks) {
+                                unlockedTaskIds.forEach { activityManagerWrapper.removeTask(it) }
+                            } else {
+                                activityManagerWrapper.removeAllRecentTasks()
+                            }
+                        }
                         removeAllTaskViews()
+                        if (hasTaskViews()) {
+                            updateTaskSize()
+                            mUtils.updateChildTaskOrientations()
+                            updateScrollSynchronously()
+                        }
                         if (!mUtils.isInDesktopFirstMode()) {
                             startHome()
                         }
@@ -689,10 +708,14 @@ constructor(
         if (taskViewOffsetPairs.isEmpty()) return previousSpring
         var lastTaskViewSpring = previousSpring
         var previousColumnDriverSpring = previousSpring
+        var previousColumnDriverTarget = dismissedTaskGap
+        var lastTaskViewTarget = dismissedTaskGap
         var lastColumnOffset = taskViewOffsetPairs.first().second
+        var reflowingTaskIndex = 0
         taskViewOffsetPairs
             .filter { (taskView, _) ->
-                willTaskBeVisibleAfterDismiss(taskView, dismissedTaskGap.roundToInt())
+                recentsView.isKamiRecentsStyleActive ||
+                    willTaskBeVisibleAfterDismiss(taskView, dismissedTaskGap.roundToInt())
             }
             .forEach { (taskView, column) ->
                 val startValue =
@@ -706,6 +729,12 @@ constructor(
                             (if (recentsView.isRtl) -recentsView.mLastComputedTaskSize.right
                             else recentsView.mLastComputedTaskSize.right)
                     } else 0f
+                val taskReflowTarget =
+                    recentsView.getStackDismissReflowTarget(
+                        taskView,
+                        dismissedTaskGap,
+                        recentsView.isKamiRecentsStyleActive && reflowingTaskIndex > 0,
+                    )
                 val taskViewSpringAnimation =
                     SpringAnimation(
                             taskView,
@@ -713,7 +742,7 @@ constructor(
                                 taskView.primaryDismissTranslationProperty
                             ),
                         )
-                        .setSpring(createExpressiveGridReflowSpringForce(dismissedTaskGap))
+                        .setSpring(createExpressiveGridReflowSpringForce(taskReflowTarget))
                         .setStartValue(startValue)
                 // Update live tile on spring animation.
                 if (taskView.isRunningTask && recentsView.enableDrawingLiveTile) {
@@ -729,17 +758,42 @@ constructor(
                 // should both be pulled by the previous spring at the same time.
                 if (column != lastColumnOffset) {
                     previousColumnDriverSpring = lastTaskViewSpring
+                    previousColumnDriverTarget = lastTaskViewTarget
                     lastColumnOffset = column
                 }
-                previousColumnDriverSpring.addUpdateListener { _, value, _ ->
-                    taskViewSpringAnimation.animateToFinalPosition(value)
+                val driverSpringForTask = previousColumnDriverSpring
+                val driverTargetForTask = previousColumnDriverTarget
+                if (recentsView.isStackRecentsStyleActive) {
+                    driverSpringForTask.addUpdateListener { _, value, _ ->
+                        taskViewSpringAnimation.animateToFinalPosition(
+                            getStackReflowSpringValue(value, driverTargetForTask, taskReflowTarget)
+                        )
+                    }
+                } else {
+                    driverSpringForTask.addUpdateListener { _, value, _ ->
+                        taskViewSpringAnimation.animateToFinalPosition(value)
+                    }
                 }
                 lastTaskViewSpring = taskViewSpringAnimation
-                reflowSpringSet.trackSpring(taskViewSpringAnimation, dismissedTaskGap)
+                lastTaskViewTarget = taskReflowTarget
+                reflowSpringSet.trackSpring(taskViewSpringAnimation, taskReflowTarget)
                 recentsView.mTaskViewsDismissPrimaryTranslations[taskView] =
-                    dismissedTaskGap.toInt()
+                    taskReflowTarget.toInt()
+                reflowingTaskIndex++
             }
         return lastTaskViewSpring
+    }
+
+    private fun getStackReflowSpringValue(
+        value: Float,
+        driverTarget: Float,
+        taskReflowTarget: Float,
+    ): Float {
+        return if (driverTarget == 0f) {
+            taskReflowTarget
+        } else {
+            value / driverTarget * taskReflowTarget
+        }
     }
 
     /** Animates non-reflowing tasks when splitting while current page is a desktop tile. */
@@ -974,6 +1028,20 @@ constructor(
 
             // Page snapping and relayout to run after all animations have completed.
             val onFinishComplete = {
+                val isCustomStyle = com.android.launcher3.LauncherPrefs.RECENTS_STYLE.get(recentsView.context) != "default"
+                val previousScales = mutableMapOf<Int, Float>()
+                val previousScaleYs = mutableMapOf<Int, Float>()
+                val taskViews = recentsView.taskViews
+
+                if (isCustomStyle) {
+                    taskViews.forEach { tv ->
+                        if (tv !== dismissedTaskView) {
+                            previousScales[tv.taskViewId] = tv.scaleX
+                            previousScaleYs[tv.taskViewId] = tv.scaleY
+                        }
+                    }
+                }
+
                 // Reset task translations as they may have updated via the dismiss animations.
                 resetTaskVisuals()
 
@@ -1006,6 +1074,70 @@ constructor(
 
                 // Update the UI after removal and snap to page.
                 updateUiAfterTaskRemoval(dismissedTaskView, pageToSnapTo, isDismissingHomeTask)
+
+                if (isCustomStyle) {
+                    val scaleAnimators = java.util.ArrayList<android.animation.Animator>()
+                    val currentAnimatedScalesX = mutableMapOf<Int, Float>()
+                    val currentAnimatedScalesY = mutableMapOf<Int, Float>()
+
+                    taskViews.forEach { tv ->
+                        val targetScaleX = tv.scaleX
+                        val targetScaleY = tv.scaleY
+                        val startScaleX = previousScales[tv.taskViewId] ?: targetScaleX
+                        val startScaleY = previousScaleYs[tv.taskViewId] ?: targetScaleY
+
+                        if (startScaleX != targetScaleX || startScaleY != targetScaleY) {
+                            currentAnimatedScalesX[tv.taskViewId] = startScaleX
+                            currentAnimatedScalesY[tv.taskViewId] = startScaleY
+
+                            val animatorX = android.animation.ValueAnimator.ofFloat(startScaleX, targetScaleX)
+                            animatorX.addUpdateListener { anim ->
+                                val value = anim.animatedValue as Float
+                                currentAnimatedScalesX[tv.taskViewId] = value
+                                tv.scaleX = value
+                            }
+
+                            val animatorY = android.animation.ValueAnimator.ofFloat(startScaleY, targetScaleY)
+                            animatorY.addUpdateListener { anim ->
+                                val value = anim.animatedValue as Float
+                                currentAnimatedScalesY[tv.taskViewId] = value
+                                tv.scaleY = value
+                            }
+
+                            scaleAnimators.add(animatorX)
+                            scaleAnimators.add(animatorY)
+                        }
+                    }
+                    if (scaleAnimators.isNotEmpty()) {
+                        val animSet = android.animation.AnimatorSet()
+                        animSet.playTogether(scaleAnimators)
+                        animSet.duration = 300
+                        animSet.interpolator = android.view.animation.PathInterpolator(0.33f, 1f, 0.68f, 1f)
+
+                        // Prevent doScrollScale() during layout passes from overriding our scale
+                        val preDrawListener = object : android.view.ViewTreeObserver.OnPreDrawListener {
+                            override fun onPreDraw(): Boolean {
+                                taskViews.forEach { tv ->
+                                    currentAnimatedScalesX[tv.taskViewId]?.let { tv.scaleX = it }
+                                    currentAnimatedScalesY[tv.taskViewId]?.let { tv.scaleY = it }
+                                }
+                                return true
+                            }
+                        }
+                        recentsView.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+
+                        animSet.addListener(object : android.animation.AnimatorListenerAdapter() {
+                            override fun onAnimationEnd(animation: android.animation.Animator) {
+                                recentsView.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
+                                taskViews.forEach { tv ->
+                                    currentAnimatedScalesX[tv.taskViewId]?.let { tv.scaleX = it }
+                                    currentAnimatedScalesY[tv.taskViewId]?.let { tv.scaleY = it }
+                                }
+                            }
+                        })
+                        animSet.start()
+                    }
+                }
 
                 if (!dismissingForSplitSelection) {
                     InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_TASK_DISMISS)
@@ -1264,7 +1396,11 @@ constructor(
         val resourceProvider = DynamicResource.provider(recentsView.mContainer)
         return SpringForce(finalPosition)
             .setDampingRatio(
-                resourceProvider.getFloat(R.dimen.expressive_dismiss_task_trans_x_damping_ratio)
+                if (recentsView.isStackRecentsStyleActive) {
+                    STACK_STYLE_REFLOW_DAMPING_RATIO
+                } else {
+                    resourceProvider.getFloat(R.dimen.expressive_dismiss_task_trans_x_damping_ratio)
+                }
             )
             .setStiffness(
                 resourceProvider.getFloat(R.dimen.expressive_dismiss_task_trans_x_stiffness)
@@ -1473,6 +1609,7 @@ constructor(
     private companion object {
         // The additional damping to apply to tasks further from the dismissed task.
         private const val ADDITIONAL_DISMISS_DAMPING_RATIO = 0.15f
+        private const val STACK_STYLE_REFLOW_DAMPING_RATIO = 1f
         private const val RECENTS_SCALE_SPRING_MULTIPLIER = 1000f
         private const val DEFAULT_DISMISS_THRESHOLD_FRACTION = 0.5f
         private const val SPEED_UP_STIFFNESS = 100_000f

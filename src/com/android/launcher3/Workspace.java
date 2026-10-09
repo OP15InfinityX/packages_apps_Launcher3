@@ -2081,8 +2081,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 spanX = dragCellInfo.spanX;
                 spanY = dragCellInfo.spanY;
             } else {
-                spanX = d.dragInfo.spanX;
-                spanY = d.dragInfo.spanY;
+               spanX = d.dragInfo.spanX;
+               spanY = d.dragInfo.spanY;
+            }
+
+            if (mLauncher.isHotseatLayout(dropTargetLayout)) {
+               spanX = 1;
+               spanY = 1;
+               d.dragInfo.spanX = 1;
+               d.dragInfo.spanY = 1;
             }
 
             int minSpanX = spanX;
@@ -2229,8 +2236,18 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
             target.removeView(v);
             mStatsLogManager.logger().withItemInfo(destInfo).withInstanceId(d.logInstanceId)
                     .log(LauncherEvent.LAUNCHER_ITEM_DROP_FOLDER_CREATED);
-            FolderIcon fi = mLauncher.addFolder(target, container, screenId, targetCell[0],
-                    targetCell[1]);
+            int spanX = destInfo.spanX > 0 ? destInfo.spanX : 1;
+            int spanY = destInfo.spanY > 0 ? destInfo.spanY : 1;
+            if (container == CONTAINER_HOTSEAT) {
+                spanX = 1;
+                spanY = 1;
+                sourceInfo.spanX = 1;
+                sourceInfo.spanY = 1;
+            }
+            int folderCellX = destInfo.cellX >= 0 ? destInfo.cellX : targetCell[0];
+            int folderCellY = destInfo.cellY >= 0 ? destInfo.cellY : targetCell[1];
+            FolderIcon fi = mLauncher.addFolder(target, container, screenId, folderCellX,
+                    folderCellY, spanX, spanY);
             destInfo.cellX = -1;
             destInfo.cellY = -1;
             sourceInfo.cellX = -1;
@@ -2380,6 +2397,15 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                         mDragInfo.screenId : getCellLayoutId(dropTargetLayout);
                 int spanX = mDragInfo != null ? mDragInfo.spanX : 1;
                 int spanY = mDragInfo != null ? mDragInfo.spanY : 1;
+                if (hasMovedIntoHotseat) {
+                    spanX = 1;
+                    spanY = 1;
+                    ItemInfo draggedItem = (ItemInfo) cell.getTag();
+                    if (draggedItem != null) {
+                        draggedItem.spanX = 1;
+                        draggedItem.spanY = 1;
+                    }
+                }
                 // First we find the cell nearest to point at which the item is
                 // dropped, without any consideration to whether there is an item there.
 
@@ -2826,6 +2852,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 minSpanY = item.minSpanY;
             }
 
+            // If the drag target is the hotseat, we can only fit 1x1 items.
+            if (mLauncher.isHotseatLayout(mDragTargetLayout)) {
+               minSpanX = minSpanY = 1;
+               item.spanX = 1;
+               item.spanY = 1;
+            }
+
             mTargetCell = findNearestArea((int) mDragViewVisualCenter[0],
                     (int) mDragViewVisualCenter[1], item.spanX, item.spanY,
                     mDragTargetLayout, mTargetCell);
@@ -3013,7 +3046,12 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
     }
 
     private void manageFolderFeedback(float distance, DragObject dragObject) {
-        if (distance > mDragTargetLayout.getFolderCreationRadius(mTargetCell)) {
+        float creationRadius = mDragTargetLayout.getFolderCreationRadius(mTargetCell);
+        if (dragObject.dragInfo.spanX > 1 || dragObject.dragInfo.spanY > 1) {
+            creationRadius *= 1.5f;
+        }
+
+        if (distance > creationRadius) {
             if ((mDragMode == DRAG_MODE_ADD_TO_FOLDER
                     || mDragMode == DRAG_MODE_CREATE_FOLDER)) {
                 setDragMode(DRAG_MODE_NONE);
@@ -3039,7 +3077,8 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
                 api.getIconDrawableArea().onTemporaryContainerChange(DISPLAY_FOLDER);
             }
 
-            mFolderCreateBg.animateToAccept(mDragTargetLayout, mTargetCell[0], mTargetCell[1]);
+            CellLayoutLayoutParams lp = (CellLayoutLayoutParams) mDragOverView.getLayoutParams();
+            mFolderCreateBg.animateToAccept(mDragTargetLayout, lp.getCellX(), lp.getCellY());
             mDragTargetLayout.clearDragOutlines();
             setDragMode(DRAG_MODE_CREATE_FOLDER);
 
@@ -3179,6 +3218,13 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (mDragInfo != null) {
             spanX = mDragInfo.spanX;
             spanY = mDragInfo.spanY;
+        }
+
+        if (mLauncher.isHotseatLayout(cellLayout)) {
+            spanX = 1;
+            spanY = 1;
+            info.spanX = 1;
+            info.spanY = 1;
         }
         final int screenId = getCellLayoutId(cellLayout);
         if (!mLauncher.isHotseatLayout(cellLayout)
@@ -3832,7 +3878,7 @@ public class Workspace<T extends View & PageIndicator> extends PagedView<T>
         if (!workspaceInModalState()) {
             if (getNextPage() != page) {
                 snapToPage(page);
-            } else {
+            } else if (mLauncher.canOpenAllApps()) {
                 mLauncher.getStateManager().goToState(ALL_APPS);
             }
         }

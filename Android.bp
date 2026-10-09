@@ -283,6 +283,18 @@ java_import {
     ],
 }
 
+android_library_import {
+    name: "lib-emoji2-emojipicker",
+    aars: ["libs/emoji2-emojipicker-1.6.0.aar"],
+    sdk_version: "current",
+    static_libs: [
+        "androidx.emoji2_emoji2",
+        "androidx.emoji2_emoji2-views-helper",
+        "androidx.recyclerview_recyclerview",
+        "androidx.core_core",
+    ],
+}
+
 // Library with all the dependencies for building Launcher3
 android_library {
     name: "Launcher3ResLib",
@@ -324,6 +336,8 @@ android_library {
         "launcher-executor-qualifiers",
         "launcher-executors-module",
         "libGoogleFeed",
+        "androidx.emoji2_emoji2",
+        "lib-emoji2-emojipicker",
         "mediaprovider_exported_aconfig_flag_lib",
         "widget_picker_component",
         "workspace-functions",

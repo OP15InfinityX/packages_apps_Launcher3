@@ -343,7 +343,7 @@ public final class WellbeingModel implements SafeCloseable {
 
     public static final SystemShortcut.Factory<ActivityContext> PAUSE_APPS =
             (activity, itemInfo, originalView) -> {
-                if (originalView == null) {
+                if (originalView == null || itemInfo.getTargetComponent() == null) {
                     return null;
                 }
                 String packageName = itemInfo.getTargetComponent().getPackageName();
