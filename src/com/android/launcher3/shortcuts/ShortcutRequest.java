@@ -28,6 +28,7 @@ import android.os.UserHandle;
 import androidx.annotation.Nullable;
 
 import com.android.launcher3.logging.FileLog;
+import com.android.launcher3.pm.UserCache;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -96,13 +97,22 @@ public class ShortcutRequest {
         if (!WIDGETS_ENABLED || mFailed) {
             return QueryResult.DEFAULT;
         }
+        UserCache userCache = UserCache.INSTANCE.get(mContext);
+        if (userCache.isLockedForShortcutQuery(mUserHandle)) {
+            return QueryResult.DEFAULT;
+        }
         mQuery.setQueryFlags(flags);
 
         try {
             return new QueryResult(mContext.getSystemService(LauncherApps.class)
                     .getShortcuts(mQuery, mUserHandle));
         } catch (SecurityException | IllegalStateException e) {
-            FileLog.e(TAG, "Failed to query for shortcuts", e);
+            if (userCache.isPrivate(mUserHandle) || userCache.isWork(mUserHandle)) {
+                FileLog.d(TAG, "Failed to query shortcuts for profile " + mUserHandle
+                        + ": " + e.getMessage());
+            } else {
+                FileLog.e(TAG, "Failed to query for shortcuts", e);
+            }
             return QueryResult.DEFAULT;
         }
     }
