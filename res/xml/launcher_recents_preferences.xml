@@ -74,6 +74,15 @@
             android:defaultValue="false"
             launcher:iconSpaceReserved="false" />
 
+        <SwitchPreferenceCompat
+            android:key="pref_recents_clear_all_preserve_active"
+            android:title="@string/recents_clear_all_preserve_active_title"
+            android:summary="@string/recents_clear_all_preserve_active_summary"
+            android:defaultValue="false"
+            android:persistent="true"
+            android:dependency="pref_recents_clear_all"
+            launcher:iconSpaceReserved="false" />
+
         <com.android.launcher3.settings.preferences.CustomSeekBarPreference
             android:key="pref_recents_opacity"
             android:title="@string/background_opacity_title"

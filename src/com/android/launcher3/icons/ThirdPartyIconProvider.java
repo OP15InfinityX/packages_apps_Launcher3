@@ -20,16 +20,11 @@ import static com.android.launcher3.icons.BaseIconFactory.CONFIG_HINT_NO_WRAP;
 @LauncherAppSingleton
 public class ThirdPartyIconProvider extends LauncherIconProvider {
 
-    private final Context mContext;
-    private final ThemeManager mThemeManager;
-
     @Inject
     public ThirdPartyIconProvider(
             @ApplicationContext Context context,
             ThemeManager themeManager) {
         super(context, themeManager);
-        mContext = context;
-        mThemeManager = themeManager;
     }
 
     public ThirdPartyIconProvider(Context context) {

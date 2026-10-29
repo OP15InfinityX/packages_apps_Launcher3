@@ -194,6 +194,8 @@
     <!-- Recents icons -->
     <string name="recents_screenshot_title">Screenshot</string>
     <string name="recents_clear_all_title">Clear all</string>
+    <string name="recents_clear_all_preserve_active_title">Preserve active app from clear all action</string>
+    <string name="recents_clear_all_preserve_active_summary">Prevent app-in-use from being cleared when the “Clear All” button is pressed.</string>
     <string name="recents_lens_title">Lens</string>
 
     <!-- Overview gesture -->

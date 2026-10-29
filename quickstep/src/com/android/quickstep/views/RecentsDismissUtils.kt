@@ -28,6 +28,7 @@ import androidx.dynamicanimation.animation.FloatValueHolder
 import androidx.dynamicanimation.animation.SpringAnimation
 import androidx.dynamicanimation.animation.SpringForce
 import com.android.internal.jank.Cuj
+import com.android.launcher3.LauncherPrefs
 import com.android.launcher3.PagedView
 import com.android.launcher3.R
 import com.android.launcher3.concurrent.annotations.LightweightBackground
@@ -333,49 +334,83 @@ constructor(
 
     /** Dismisses all tasks, except the ones locked in Recents. */
     fun dismissAllTasks() {
+        val preserveActiveApp = LauncherPrefs.RECENTS_CLEAR_ALL_PRESERVE_ACTIVE.get(recentsView.context)
+        val runningTaskView =
+            if (preserveActiveApp) {
+                recentsView.runningTaskView?.takeIf { it.parent === recentsView }
+            } else {
+                null
+            }
         val taskViews = recentsView.mUtils.taskViews.toList()
         val hasLockedTasks = taskViews.any { it.isLocked }
-        val unlockedTaskIds =
-            if (hasLockedTasks) {
-                taskViews.filterNot { it.isLocked }.flatMap { it.taskIds.asList() }
-            } else {
-                emptyList()
-            }
+        val tasksToDismiss = taskViews.filter { it !== runningTaskView && !it.isLocked }
+        val taskIdsToDismiss = tasksToDismiss.flatMap { it.taskIds.asList() }
         val allDismissSprings =
-            taskViews
+            tasksToDismiss
                 .reversed()
-                .filter { taskView -> recentsView.isTaskViewVisible(taskView) && !taskView.isLocked }
+                .filter { taskView -> recentsView.isTaskViewVisible(taskView) }
                 .mapNotNull { createDismissedTaskViewSpringAnimation(it) }
         SpringSet(SpringAnimation(FloatValueHolder()).setSpring(SpringForce(1f)))
             .playTogether(allDismissSprings)
             .addEndListener {
                 with(recentsView) {
-                    // Remove desktops first, since desks can be empty (so they have no recent
-                    // tasks), and closing all tasks on a desk doesn't always necessarily mean that
-                    // the desk will be removed. So, there are no guarantees that the below call to
-                    // `ActivityManagerWrapper::removeAllRecentTasks()` will be enough.
-                    systemUiProxy.removeAllDesks(DesktopModeTransitionSource.RECENTS)
-
-                    // Remove all the task views now
-                    finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false) {
+                    if (runningTaskView != null) {
                         uiHelperExecutor.execute {
-                            if (hasLockedTasks) {
-                                unlockedTaskIds.forEach { activityManagerWrapper.removeTask(it) }
-                            } else {
-                                activityManagerWrapper.removeAllRecentTasks()
-                            }
+                            taskIdsToDismiss.forEach { activityManagerWrapper.removeTask(it) }
                         }
-                        removeAllTaskViews()
+                        tasksToDismiss.forEach { removeView(it) }
                         if (hasTaskViews()) {
                             updateTaskSize()
                             mUtils.updateChildTaskOrientations()
                             updateScrollSynchronously()
+                            val runningIndex = indexOfChild(runningTaskView)
+                            if (runningIndex != -1) {
+                                setCurrentPage(runningIndex)
+                            }
                         }
-                        if (!mUtils.isInDesktopFirstMode()) {
-                            startHome()
+                        val launchCallback = runningTaskView.launchWithAnimation()
+                        if (launchCallback != null) {
+                            launchCallback.add {
+                                onDismissAnimationEnds()
+                                InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
+                            }
+                        } else {
+                            finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false) {
+                                if (!mUtils.isInDesktopFirstMode()) {
+                                    startHome()
+                                }
+                                onDismissAnimationEnds()
+                                InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
+                            }
                         }
-                        onDismissAnimationEnds()
-                        InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
+                    } else {
+                        // Remove desktops first, since desks can be empty (so they have no recent
+                        // tasks), and closing all tasks on a desk doesn't always necessarily mean that
+                        // the desk will be removed. So, there are no guarantees that the below call to
+                        // `ActivityManagerWrapper::removeAllRecentTasks()` will be enough.
+                        systemUiProxy.removeAllDesks(DesktopModeTransitionSource.RECENTS)
+
+                        // Remove all the task views now
+                        finishRecentsAnimation(/* toHome */ true, /* shouldPip */ false) {
+                            uiHelperExecutor.execute {
+                                if (hasLockedTasks) {
+                                    taskIdsToDismiss.forEach { activityManagerWrapper.removeTask(it) }
+                                } else {
+                                    activityManagerWrapper.removeAllRecentTasks()
+                                }
+                            }
+                            removeAllTaskViews()
+                            if (hasTaskViews()) {
+                                updateTaskSize()
+                                mUtils.updateChildTaskOrientations()
+                                updateScrollSynchronously()
+                            }
+                            if (!mUtils.isInDesktopFirstMode()) {
+                                startHome()
+                            }
+                            onDismissAnimationEnds()
+                            InteractionJankMonitorWrapper.end(Cuj.CUJ_LAUNCHER_OVERVIEW_CLEAR_ALL)
+                        }
                     }
                 }
             }

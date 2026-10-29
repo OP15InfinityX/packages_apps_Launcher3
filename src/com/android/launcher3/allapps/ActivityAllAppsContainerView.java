@@ -977,8 +977,12 @@ public class ActivityAllAppsContainerView<T extends Context & ActivityContext>
         if (mUseCustomBackgroundColor) {
             return mCustomBackgroundColor;
         }
-        return isBackgroundBlurEnabled()
-                ? mBottomSheetBackgroundColorOverBlur
+        if (isBackgroundBlurEnabled()) {
+            return mBottomSheetBackgroundColorOverBlur;
+        }
+        return isFullscreenStyle()
+                ? AppDrawerStyle.applyDrawerOpacity(
+                        getContext(), mBottomSheetBackgroundColorBlurFallback)
                 : mBottomSheetBackgroundColorBlurFallback;
     }
 

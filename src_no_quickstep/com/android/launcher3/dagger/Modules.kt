@@ -26,6 +26,8 @@ import com.android.launcher3.dragndrop.SystemDragController
 import com.android.launcher3.dragndrop.SystemDragControllerStub
 import com.android.launcher3.homescreenfiles.HomeScreenFilesNoOpProvider
 import com.android.launcher3.homescreenfiles.HomeScreenFilesProvider
+import com.android.launcher3.icons.LauncherIconProvider
+import com.android.launcher3.icons.ThirdPartyIconProvider
 import com.android.launcher3.qsb.QsbAppWidgetHost
 import com.android.launcher3.qsb.QsbAppWidgetHostImpl
 import com.android.launcher3.util.BaseDefaultsValueProvider
@@ -64,6 +66,9 @@ abstract class ActivityContextModule {
 abstract class ApiWrapperModule {
 
     @Binds abstract fun bindDisplayController(impl: DisplayControllerImpl): DisplayController
+
+    @Binds
+    abstract fun bindIconProvider(iconProvider: ThirdPartyIconProvider): LauncherIconProvider
 }
 
 @Module

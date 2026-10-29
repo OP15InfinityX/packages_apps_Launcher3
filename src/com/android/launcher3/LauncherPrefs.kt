@@ -327,6 +327,7 @@ constructor(@ApplicationContext private val encryptedContext: Context) {
         @JvmField val SEARCH_RADIUS_SIZE = backedUpItem("pref_search_radius_size", 100)
         @JvmField val ICON_SIZE = backedUpItem("pref_custom_icon_size", 100)
         @JvmField val RECENTS_CLEAR_ALL = backedUpItem("pref_recents_clear_all", true)
+        @JvmField val RECENTS_CLEAR_ALL_PRESERVE_ACTIVE = backedUpItem("pref_recents_clear_all_preserve_active", false)
         @JvmField val RECENTS_LENS = backedUpItem("pref_recents_lens", false)
         @JvmField val RECENTS_MEMINFO = backedUpItem("pref_recents_meminfo", false)
         @JvmField val RECENTS_STYLE = backedUpItem("pref_recents_style", "default")
