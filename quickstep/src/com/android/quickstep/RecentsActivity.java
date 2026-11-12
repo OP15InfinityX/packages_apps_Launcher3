@@ -152,6 +152,10 @@ public final class RecentsActivity extends StatefulActivity<RecentsState> implem
     // Tracks whether the current state should have RecentsView visible.
     private boolean mIsInRecentsViewVisibleState = false;
 
+    // Toggles the pane title between two texts that sound the same, see
+    // announceOverviewIfNeeded().
+    private boolean mAccessibilityPaneTitleToggle;
+    private boolean mOverviewAnnounced;
 
     /**
      * Init drag layer and overview panel views.
@@ -426,6 +430,7 @@ public final class RecentsActivity extends StatefulActivity<RecentsState> implem
         // Workaround for b/78520668, explicitly trim memory once UI is hidden
         onTrimMemory(TRIM_MEMORY_UI_HIDDEN);
         mFallbackRecentsView.updateLocusId();
+        mOverviewAnnounced = false;
         AccessibilityManagerCompat.sendTestProtocolEventToTest(
                 this, LAUNCHER_ACTIVITY_STOPPED_MESSAGE);
     }
@@ -442,6 +447,40 @@ public final class RecentsActivity extends StatefulActivity<RecentsState> implem
     protected void onResume() {
         super.onResume();
         AccessibilityManagerCompat.sendStateEventToTest(getBaseContext(), OVERVIEW_STATE_ORDINAL);
+        announceOverviewIfNeeded();
+    }
+
+    /**
+     * Announces the overview to accessibility services once per appearance.
+     *
+     * <p>The window of this activity is reused between visits and its title is set only once
+     * in {@link #onCreate}, so nothing tells a screen reader that the window came back. When
+     * the overview is opened from a regular app the previous window disappears and the focus
+     * inside it becomes invalid, which forces the reader into the overview. When it is opened
+     * from a third party home app that window stays alive behind the translucent overview, so
+     * the reader keeps its focus there and stays silent.
+     *
+     * <p>Changing the pane title reports a window state change, which is what makes the reader
+     * enter the window. The two texts differ by a zero width space, which is not spoken, so the
+     * announcement sounds the same on every appearance.
+     */
+    private void announceOverviewIfNeeded() {
+        if (mOverviewAnnounced || mFallbackRecentsView == null || !hasWindowFocus()
+                || !isRecentsViewVisible()) {
+            return;
+        }
+        mOverviewAnnounced = true;
+        mFallbackRecentsView.post(() -> {
+            if (isFinishing() || isDestroyed() || !hasWindowFocus()) {
+                // Left the overview before the update ran; let the next appearance announce.
+                mOverviewAnnounced = false;
+                return;
+            }
+            CharSequence title = getText(R.string.accessibility_recent_apps);
+            mAccessibilityPaneTitleToggle = !mAccessibilityPaneTitleToggle;
+            mFallbackRecentsView.setAccessibilityPaneTitle(
+                    mAccessibilityPaneTitleToggle ? title + "\u200B" : title);
+        });
     }
 
     @Override
@@ -477,6 +516,10 @@ public final class RecentsActivity extends StatefulActivity<RecentsState> implem
         if (!hasFocus) {
             AccessibilityManagerCompat.sendTestProtocolEventToTest(
                     this, LAUNCHER_ACTIVITY_LOST_WINDOW_FOCUS_MESSAGE);
+        } else {
+            // Regaining the window focus is another way of entering the overview, for example
+            // when the overview stayed alive behind a launched app.
+            announceOverviewIfNeeded();
         }
     }
 
@@ -514,6 +557,12 @@ public final class RecentsActivity extends StatefulActivity<RecentsState> implem
             moveTaskToBack(/*nonRoot=*/true);
         }
         mIsInRecentsViewVisibleState = state.isRecentsViewVisible();
+
+        if (mIsInRecentsViewVisibleState) {
+            announceOverviewIfNeeded();
+        } else {
+            mOverviewAnnounced = false;
+        }
     }
 
     @Override

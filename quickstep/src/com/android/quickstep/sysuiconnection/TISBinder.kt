@@ -34,6 +34,7 @@ import com.android.launcher3.util.Executors.getTaskbarUiThread
 import com.android.launcher3.util.LockedUserState
 import com.android.launcher3.util.PostUnlockObject
 import com.android.launcher3.util.ThreadSafeRunnableList
+import com.android.quickstep.GestureState.displaySupportsHomeGesture
 import com.android.quickstep.OverviewCommandHelper
 import com.android.quickstep.OverviewCommandHelper.CommandType.HIDE_ALT_TAB
 import com.android.quickstep.OverviewCommandHelper.CommandType.SHOW_ALT_TAB
@@ -248,6 +249,7 @@ internal constructor(
     @BinderThread
     override fun onDisplayRemoved(displayId: Int) = withState {
         systemDecorationChangeObserver.notifyOnDisplayRemoved(displayId)
+        sysUIProxy.focusState.onDisplayRemoved(displayId)
     }
 
     @BinderThread
@@ -352,10 +354,14 @@ internal constructor(
         val overviewComponentObserver: OverviewComponentObserver? by overviewComponentObserver
         val actionCornerHandler: ActionCornerHandler? by actionCornerHandler
 
-        fun focusedDisplayIdForOverviewOnConnectedDisplays() =
-            sysUIProxy.focusState.focusedDisplayId
+        fun focusedDisplayIdForOverviewOnConnectedDisplays(): Int {
+            val focusedId = sysUIProxy.focusState.focusedDisplayId
+            return if (displaySupportsHomeGesture(focusedId)) focusedId else Display.DEFAULT_DISPLAY
+        }
 
-        fun focusedDisplayIdForAltTabKqsOnConnectedDisplays() =
-            sysUIProxy.focusState.focusedDisplayId
+        fun focusedDisplayIdForAltTabKqsOnConnectedDisplays(): Int {
+            val focusedId = sysUIProxy.focusState.focusedDisplayId
+            return if (displaySupportsHomeGesture(focusedId)) focusedId else Display.DEFAULT_DISPLAY
+        }
     }
 }

@@ -41,6 +41,12 @@ class FocusState {
 
     fun removeListener(l: FocusChangeListener) = listeners.remove(l)
 
+    fun onDisplayRemoved(displayId: Int) {
+        if (focusedDisplayId == displayId) {
+            focusedDisplayId = DEFAULT_DISPLAY
+        }
+    }
+
     fun init(transitions: IShellTransitions?) {
         try {
             transitions?.setFocusTransitionListener(

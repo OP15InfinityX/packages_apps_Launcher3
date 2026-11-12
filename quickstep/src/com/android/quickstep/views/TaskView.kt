@@ -782,6 +782,8 @@ constructor(
 
     override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
         super.onInitializeAccessibilityNodeInfo(info)
+        fillMissingContentDescription(info)
+
         with(info) {
             // Only make actions available if the app icon menu is visible to the user.
             // When modalness is >0, the user is in select mode and the icon menu is hidden.
@@ -821,6 +823,31 @@ constructor(
                         false,
                     )
             }
+        }
+    }
+
+    private fun fillMissingContentDescription(info: AccessibilityNodeInfo) {
+        if (!::taskContainers.isInitialized || !info.contentDescription.isNullOrEmpty()) return
+
+        val containers = if (isLayoutRtl) taskContainers.reversed() else taskContainers
+        val snapshotDescriptions =
+            containers.map {
+                it.snapshotView.contentDescription?.toString()?.takeIf(String::isNotBlank)
+            }
+        if (snapshotDescriptions.none { it == null }) return
+
+        val description =
+            containers
+                .zip(snapshotDescriptions)
+                .mapNotNull { (container, snapshotDescription) ->
+                    snapshotDescription
+                        ?: container.task.titleDescription?.takeIf(String::isNotBlank)
+                        ?: container.task.title?.takeIf(String::isNotBlank)
+                }
+                .distinct()
+                .joinToString(", ")
+        if (description.isNotEmpty()) {
+            info.contentDescription = description
         }
     }
 
